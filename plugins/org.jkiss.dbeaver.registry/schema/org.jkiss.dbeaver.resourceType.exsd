@@ -1,0 +1,73 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!-- Schema file written by PDE -->
+<schema targetNamespace="org.jkiss.dbeaver.registry" xmlns="http://www.w3.org/2001/XMLSchema">
+<annotation>
+      <appInfo>
+         <meta.schema plugin="org.jkiss.dbeaver.registry" id="org.jkiss.dbeaver.resourceType" name="Resource types"/>
+      </appInfo>
+   </annotation>
+
+   <element name="extension">
+      <annotation><appInfo><meta.element/></appInfo></annotation>
+      <complexType>
+         <sequence>
+            <element ref="type" minOccurs="0" maxOccurs="unbounded"/>
+         </sequence>
+         <attribute name="point" type="string" use="required"/>
+         <attribute name="id" type="string"/>
+         <attribute name="name" type="string">
+            <annotation>
+               <appInfo>
+                  <meta.attribute translatable="true"/>
+               </appInfo>
+            </annotation>
+         </attribute>
+      </complexType>
+   </element>
+
+   <element name="type">
+      <complexType>
+         <sequence>
+            <element ref="resourceTypeBinding" minOccurs="0" maxOccurs="unbounded"/>
+            <element ref="contentTypeBinding" minOccurs="0" maxOccurs="unbounded"/>
+            <element ref="root" minOccurs="0" maxOccurs="unbounded"/>
+         </sequence>
+         <attribute name="id" type="string" use="required"/>
+         <attribute name="name" type="string"/>
+         <attribute name="icon" type="string"/>
+         <attribute name="folderIcon" type="string"/>
+         <attribute name="managable" type="boolean"/>
+      </complexType>
+   </element>
+
+   <element name="resourceTypeBinding">
+      <complexType>
+         <attribute name="resourceType" type="string"/>
+      </complexType>
+   </element>
+
+   <element name="contentTypeBinding">
+      <complexType>
+         <attribute name="contentTypeId" type="string"/>
+      </complexType>
+   </element>
+
+   <element name="root">
+      <complexType>
+         <attribute name="folder" type="string">
+            <annotation>
+               <appInfo>
+                  <meta.attribute translatable="true"/>
+               </appInfo>
+            </annotation>
+         </attribute>
+         <attribute name="default" type="boolean"/>
+      </complexType>
+   </element>
+
+
+
+
+
+
+</schema>

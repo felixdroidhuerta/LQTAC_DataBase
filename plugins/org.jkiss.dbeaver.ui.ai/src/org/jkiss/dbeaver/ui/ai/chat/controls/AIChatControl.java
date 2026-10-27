@@ -1,0 +1,889 @@
+/*
+ * DBeaver - Universal Database Manager
+ * Copyright (C) 2010-2026 DBeaver Corp and others
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.jkiss.dbeaver.ui.ai.chat.controls;
+
+import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.Status;
+import org.eclipse.e4.ui.css.swt.dom.WidgetElement;
+import org.eclipse.jface.text.Position;
+import org.eclipse.jface.text.source.Annotation;
+import org.eclipse.jface.text.source.IAnnotationModel;
+import org.eclipse.jface.viewers.StructuredSelection;
+import org.eclipse.osgi.util.NLS;
+import org.eclipse.swt.SWT;
+import org.eclipse.swt.custom.StyledText;
+import org.eclipse.swt.dnd.*;
+import org.eclipse.swt.events.MouseListener;
+import org.eclipse.swt.graphics.ImageData;
+import org.eclipse.swt.graphics.ImageLoader;
+import org.eclipse.swt.layout.GridData;
+import org.eclipse.swt.layout.GridLayout;
+import org.eclipse.swt.widgets.Composite;
+import org.eclipse.swt.widgets.Control;
+import org.jkiss.code.NotNull;
+import org.jkiss.code.Nullable;
+import org.jkiss.dbeaver.DBException;
+import org.jkiss.dbeaver.Log;
+import org.jkiss.dbeaver.model.DBPDataSourceContainer;
+import org.jkiss.dbeaver.model.DBUtils;
+import org.jkiss.dbeaver.model.ai.*;
+import org.jkiss.dbeaver.model.ai.prompt.AIPromptGenerateSql;
+import org.jkiss.dbeaver.model.ai.qm.AIChatStorage;
+import org.jkiss.dbeaver.model.ai.quota.UserTokenQuotaService;
+import org.jkiss.dbeaver.model.ai.registry.AIAssistantRegistry;
+import org.jkiss.dbeaver.model.ai.utils.AIUtils;
+import org.jkiss.dbeaver.model.app.DBPWorkspace;
+import org.jkiss.dbeaver.model.exec.DBCExecutionContext;
+import org.jkiss.dbeaver.model.navigator.DBNDatabaseNode;
+import org.jkiss.dbeaver.model.navigator.DBNNode;
+import org.jkiss.dbeaver.model.navigator.DBNStreamData;
+import org.jkiss.dbeaver.model.runtime.AbstractJob;
+import org.jkiss.dbeaver.model.runtime.DBRProgressMonitor;
+import org.jkiss.dbeaver.model.sql.SQLScriptElement;
+import org.jkiss.dbeaver.model.struct.DBSObject;
+import org.jkiss.dbeaver.runtime.DBWorkbench;
+import org.jkiss.dbeaver.ui.ActionUtils;
+import org.jkiss.dbeaver.ui.UIUtils;
+import org.jkiss.dbeaver.ui.ai.AIUIUtils;
+import org.jkiss.dbeaver.ui.ai.chat.AIChatController;
+import org.jkiss.dbeaver.ui.ai.chat.AIChatUtils;
+import org.jkiss.dbeaver.ui.ai.chat.internal.AIChatMessagesUI;
+import org.jkiss.dbeaver.ui.ai.internal.AIUIFeatures;
+import org.jkiss.dbeaver.ui.dnd.TreeNodeTransfer;
+import org.jkiss.dbeaver.ui.editors.sql.SQLEditor;
+import org.jkiss.dbeaver.utils.GeneralUtils;
+import org.jkiss.utils.CommonUtils;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
+import java.time.Clock;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+
+public class AIChatControl extends Composite implements AIChatContextProvider {
+    private static final Log log = Log.getLog(AIChatControl.class);
+
+    private final AIChatSession chatSession;
+    private final AIChatController controller;
+    private final PromptComposite promptComposite;
+    private volatile boolean waitingForResponse = false;
+    private volatile boolean isDataSourceInitialized = false;
+
+    private AIContextSettings activeCompletionSettings;
+    private AIChatConversation activeConversation;
+    private WebViewMessageList messageList;
+    private ContextComposite contextComposite;
+
+    public AIChatControl(@NotNull Composite parent, @NotNull AIChatController controller) {
+        super(parent, SWT.NONE);
+        this.controller = controller;
+
+        DBPWorkspace workspace = DBWorkbench.getPlatform().getWorkspace();
+        AIAssistant assistant = AIAssistantRegistry.getInstance().getAssistant(workspace);
+        AIChatSession.SessionIdProvider chatSessionProvider = assistant.getChatSessionProvider();
+        AIChatStorage chatStorage = assistant.createChatStorage();
+
+        this.chatSession = new AIChatSession(
+            workspace,
+            this,
+            chatStorage,
+            chatSessionProvider,
+            new UserTokenQuotaService(Clock.systemUTC(), chatStorage)
+        );
+
+        setBackgroundMode(SWT.INHERIT_FORCE);
+        setLayout(new GridLayout());
+
+        {
+            DBCExecutionContext executionContext = controller.getExecutionContext();
+            activeConversation = createEmptyConversation(
+                executionContext == null ? null : executionContext.getDataSource().getContainer());
+        }
+        enableDragAndDrop(this);
+
+        int chatFeatures = controller.getChatFeatures();
+
+        if (CommonUtils.isBitSet(chatFeatures, AIChatController.FEATURE_CONTEXT_VIEW)) {
+            contextComposite = createContextControl(this);
+            UIUtils.createLineSeparator(this, SWT.HORIZONTAL);
+        }
+        Control messageListComposite = createMessageListControl(this);
+        UIUtils.createLineSeparator(this, SWT.HORIZONTAL);
+
+        if (CommonUtils.isBitSet(chatFeatures, AIChatController.FEATURE_PROMPT_VIEW)) {
+            promptComposite = createPromptControl(this);
+            // Handle mouse click on empty area
+            messageListComposite.addMouseListener(
+                MouseListener.mouseDownAdapter(mouseEvent -> promptComposite.setFocusOnPrompt()));
+        } else {
+            promptComposite = null;
+        }
+
+        ProfileModelComposite profileModelComposite = new ProfileModelComposite(this, this);
+
+        List<Control> tabList = new ArrayList<>();
+        tabList.add(messageListComposite);
+        if (promptComposite != null) {
+            tabList.add(promptComposite);
+        }
+        if (contextComposite != null) {
+            tabList.add(contextComposite);
+        }
+        tabList.add(profileModelComposite);
+        setTabList(tabList.toArray(new Control[0]));
+
+        WidgetElement.applyStyles(this, true);
+
+        addDisposeListener(e -> chatSession.closeSession());
+    }
+
+    public boolean isWaitingForResponse() {
+        return waitingForResponse;
+    }
+
+    public void setWaitingForResponse(boolean waitingForResponse) {
+        this.waitingForResponse = waitingForResponse;
+    }
+
+    public void sendPrompt() {
+        if (promptComposite != null) {
+            promptComposite.submitPrompt();
+        }
+    }
+
+    @NotNull
+    public AIChatSession getChatSession() {
+        return chatSession;
+    }
+
+    /**
+     * Makes the provided {@code conversation} the current conversation,
+     * updating the prompt and message history in the UI accordingly.
+     * <p>
+     * If there was an ongoing conversation, it will be saved and the {@code conversation} will be selected instead.
+     * <p>
+     * If the conversation is not yet recorded, it will be added to the list of conversations.
+     * It can be later removed using {@link #removeActiveConversation()}.
+     *
+     * @param conversation the conversation to select
+     * @see AIChatListener#conversationChanged(AIChatConversation)
+     */
+    public void selectConversation(@NotNull AIChatConversation conversation) throws DBException {
+        if (conversation == activeConversation) {
+            return;
+        }
+
+        if (activeConversation != null) {
+            chatSession.addConversation(activeConversation);
+        }
+
+        updateActiveConversation(conversation);
+
+        AIContextSettings settings;
+        if (conversation.getDataSource() != null) {
+            settings = chatSession.getConversationSettings(conversation);
+        } else {
+            settings = null;
+        }
+
+        setCompletionSettings(settings);
+        //promptComposite.setPromptText(conversation.getInitialPrompt());
+
+        chatSession.notifyListeners(AIChatListener::conversationChanged, conversation);
+        loadConversationImages(conversation);
+    }
+
+    private void loadConversationImages(@NotNull AIChatConversation conversation) {
+        if (conversation.areImagesLoaded()) {
+            return;
+        }
+        UUID conversationId = conversation.getId();
+        if (promptComposite != null) {
+            promptComposite.imageLoadingStarted(conversationId);
+        }
+        new AbstractJob(AIChatMessagesUI.ai_chat_image_loading) {
+            @NotNull
+            @Override
+            protected IStatus run(@NotNull DBRProgressMonitor monitor) {
+                try {
+                    chatSession.loadConversationImages(monitor, conversation);
+                    UIUtils.asyncExec(() -> {
+                        if (!isDisposed() && activeConversation == conversation) {
+                            chatSession.notifyListeners(AIChatListener::conversationChanged, conversation);
+                        }
+                    });
+                    return Status.OK_STATUS;
+                } catch (DBException exception) {
+                    UIUtils.asyncExec(() -> {
+                        if (!isDisposed() && activeConversation == conversation) {
+                            DBWorkbench.getPlatformUI().showError(
+                                AIChatMessagesUI.ai_chat_image_error, AIChatMessagesUI.ai_chat_image_load_error, exception);
+                        }
+                    });
+                    return Status.CANCEL_STATUS;
+                } finally {
+                    UIUtils.asyncExec(() -> {
+                        if (!isDisposed() && promptComposite != null) {
+                            promptComposite.imageLoadingFinished(conversationId);
+                        }
+                    });
+                }
+            }
+        }.schedule();
+    }
+
+    @NotNull
+    public AIChatConversation getActiveConversation() {
+        return activeConversation;
+    }
+
+    public void updateActiveConversation(@NotNull AIChatConversation conversation) throws DBException {
+        chatSession.addConversation(conversation);
+        activeConversation = conversation;
+    }
+
+    /**
+     * Removes the active conversation from the list of conversations,
+     * selecting the last conversation in the list if available.
+     * <p>
+     * If no conversations are left, a new one will be created.
+     */
+    public void removeActiveConversation() throws DBException {
+        if (activeConversation == null) {
+            return;
+        }
+
+        chatSession.removeConversation(activeConversation);
+        activeConversation = null;
+
+        List<AIChatConversation> conversations = listConversations();
+
+        if (conversations.isEmpty()) {
+            selectConversation(createEmptyConversation(getDataSourceContainer()));
+        } else {
+            selectConversation(conversations.getLast());
+        }
+    }
+
+    @NotNull
+    AIChatConversation createEmptyConversation(@NotNull String name, @Nullable DBPDataSourceContainer container) {
+        AIPromptGenerator aiPromptGenerator = new AIPromptGenerateSql();
+
+        return new AIChatConversation(
+            name,
+            aiPromptGenerator,
+            container
+        );
+    }
+
+    @NotNull
+    AIChatConversation createEmptyConversation(@Nullable DBPDataSourceContainer container) {
+        return createEmptyConversation(AIChatMessagesUI.ai_chat_default_conversation_name, container);
+    }
+
+    /**
+     * Returns the list of conversations that are associated with the current data source container.
+     */
+    @NotNull
+    public List<AIChatConversation> listConversations() throws DBException {
+        DBPDataSourceContainer container = getDataSourceContainer();
+        return chatSession.getAllConversations(container);
+    }
+
+    public void cancelPrompt() {
+        if (activeConversation != null) {
+            activeConversation.cancelConversation();
+            chatSession.notifyListeners(AIChatListener::conversationCanceled, activeConversation);
+        }
+    }
+
+    public void submitPrompt(@NotNull String prompt) {
+        if (chatSession.isBusy() || (promptComposite != null && promptComposite.isLoadingImages())) {
+            return;
+        }
+        AIMessage promptMessage = AIMessage.userMessage(prompt.trim())
+            .withImages(promptComposite == null ? List.of() : promptComposite.getImages());
+        if (promptMessage.getContent().isEmpty() && promptMessage.getImages().isEmpty()) {
+            return;
+        }
+        Map<String, Object> additionalParameters = new LinkedHashMap<>();
+        additionalParameters.put(AIBaseFeatures.PROMPT_TYPE, activeConversation.getPromptGenerator().generatorId());
+        AIUIFeatures.SEND_PROMPT_EVENT.use(AIUIFeatures.buildFeatureParameters(getDataSourceContainer(), additionalParameters));
+        submitPrompt(promptMessage);
+    }
+
+    public void submitPrompt(@NotNull AIMessage promptMessage) {
+        AIChatConversation submittedConversation = activeConversation;
+        AIContextSettings customSettings = submittedConversation.getCustomSettings();
+        AIContextSettings settings = customSettings != null ? customSettings : getCompletionSettings();
+        if (settings != null && !AIUIUtils.confirmMetaTransfer(settings)) {
+            return;
+        }
+
+        if (!checkConfiguration()) {
+            return;
+        }
+        waitingForResponse = true;
+
+        AIChatMessage chatMessage = submittedConversation.addMessage(promptMessage);
+        chatSession.notifyMessageAdd(submittedConversation, chatMessage);
+        if (promptComposite != null && promptMessage.getRole() == AIMessageType.USER
+            && promptMessage.getContent().equals(promptComposite.getPromptText().trim())
+            && promptMessage.getImages().equals(promptComposite.getImages())) {
+            promptComposite.draftSubmitted();
+        }
+
+        submittedConversation.startConversation();
+        chatSession.setBusy(true);
+
+        new AbstractJob("Execute prompt") {
+            @NotNull
+            @Override
+            protected IStatus run(@NotNull DBRProgressMonitor monitor) {
+                try {
+                    CompletableFuture<AIChatConversation> future = chatSession.submitConversation(
+                        monitor,
+                        settings,
+                        submittedConversation,
+                        null
+                    );
+                    future.whenComplete((conversation, throwable) -> {
+                        waitingForResponse = false;
+                        chatSession.setBusy(false);
+                    });
+                    return Status.OK_STATUS;
+                } catch (Exception e) {
+                    submittedConversation.promptProcessed(true);
+                    waitingForResponse = false;
+                    chatSession.setBusy(false);
+                    return GeneralUtils.makeExceptionStatus(e);
+                }
+            }
+        }.schedule();
+    }
+
+    public boolean checkConfiguration() {
+        try {
+            if (!AIUtils.hasValidConfiguration()) {
+                AIUIUtils.showPreferences(getShell());
+                return false;
+            }
+        } catch (DBException e) {
+            log.error(e);
+        }
+        return true;
+    }
+
+    @NotNull
+    public AIAssistant getAssistant() {
+        return chatSession.getAssistant();
+    }
+
+    @Nullable
+    public WebViewMessageList getMessageList() {
+        return messageList;
+    }
+
+    public boolean setFocusOnPrompt() {
+        return promptComposite != null && promptComposite.setFocusOnPrompt();
+    }
+
+    public void setFocusOnMessages() {
+        if (messageList != null) {
+            messageList.focusChat();
+        }
+    }
+
+    public boolean focusContextBar() {
+        return contextComposite != null && contextComposite.setFocus();
+    }
+
+    public void createNewConversation() {
+        if (isBusy()) {
+            return;
+        }
+        try {
+            selectConversation(createEmptyConversation(createNewConversationName(), getDataSourceContainer()));
+            setFocusOnPrompt();
+        } catch (Exception e) {
+            DBWorkbench.getPlatformUI().showError(
+                "Error creating conversation",
+                "Could not create new conversation: " + e.getMessage(),
+                e
+            );
+        }
+    }
+
+    @NotNull
+    private String createNewConversationName() throws DBException {
+        List<AIChatConversation> conversations = listConversations();
+        String baseName = AIChatMessagesUI.ai_chat_default_conversation_name;
+        String name = baseName;
+        for (int i = 1; ; i++) {
+            String candidate = name;
+            if (conversations.stream().noneMatch(c -> c.getCaption().equals(candidate))) {
+                break;
+            }
+            name = baseName + " " + i;
+        }
+        return name;
+    }
+
+    public void deleteActiveConversationWithConfirmation() {
+        if (isBusy() || !chatSession.getStorage().canPersist()) {
+            return;
+        }
+        if (DBWorkbench.getPlatformUI().confirmAction(
+            AIChatMessagesUI.ai_chat_conversation_delete_confirm_title,
+            NLS.bind(AIChatMessagesUI.ai_chat_conversation_delete_confirm_message, getActiveConversation().getCaption())
+        )) {
+            try {
+                removeActiveConversation();
+            } catch (Exception e) {
+                DBWorkbench.getPlatformUI().showError(
+                    "Error deleting conversation",
+                    "Could not delete conversation: " + e.getMessage(),
+                    e
+                );
+            }
+        }
+    }
+
+    public void openChatSettings() {
+        if (contextComposite != null) {
+            contextComposite.openSettings();
+        }
+    }
+
+    public void openScopeDropDown() {
+        if (contextComposite != null) {
+            contextComposite.showScopeDropDown();
+        }
+    }
+
+    public void setConversationProfile(@NotNull AIChatConversation conversation, @Nullable AIConfigurationProfile profile) {
+        conversation.setProfile(profile);
+        chatSession.notifyConversationProfileChanged(conversation);
+    }
+
+    public void renameConversation(@NotNull AIChatConversation conversation, @NotNull String newName) {
+        conversation.setCaption(
+            AIChatUtils.normalizeConversationCaption(newName)
+        );
+        chatSession.notifyConversationRenamed(conversation, newName);
+    }
+
+    @Nullable
+    public DBPDataSourceContainer getDataSourceContainer() {
+        return activeCompletionSettings != null ? activeCompletionSettings.getDataSourceContainer() : null;
+    }
+
+    @Nullable
+    @Override
+    public DBCExecutionContext getExecutionContext(@NotNull DBPDataSourceContainer dataSourceContainer) {
+        DBCExecutionContext executionContext = controller.getExecutionContext();
+        if (executionContext != null && executionContext.getDataSource() == dataSourceContainer.getDataSource()) {
+            return executionContext;
+        }
+        return DBUtils.getDefaultContext(dataSourceContainer, false);
+    }
+
+    @Nullable
+    public AIContextSettings getCompletionSettings() {
+        return activeCompletionSettings;
+    }
+
+    public void setCompletionSettings(@Nullable AIContextSettings completionSettings) {
+        if (this.activeCompletionSettings != completionSettings) {
+            this.activeCompletionSettings = completionSettings;
+            chatSession.notifyListeners(AIChatListener::settingsChanged, completionSettings);
+        }
+    }
+
+    public boolean isBusy() {
+        return chatSession.isBusy();
+    }
+
+    public void setDataSource(@Nullable DBPDataSourceContainer container) throws DBException {
+        if (container == getDataSourceContainer() && isDataSourceInitialized) {
+            return;
+        }
+        isDataSourceInitialized = true;
+        AIChatConversation conversation = chatSession.getLastConversation(container);
+        this.setCompletionSettings(container == null || conversation == null ? null : chatSession.getConversationSettings(conversation));
+        this.selectConversation(
+            conversation != null ?
+                conversation :
+                createEmptyConversation(container));
+    }
+
+    public boolean hasMessages() {
+        return !activeConversation.getMessages().isEmpty();
+    }
+
+    @NotNull
+    public AIChatController getController() {
+        return controller;
+    }
+
+    public void attachFiles(@NotNull List<Path> files) {
+        if (files.isEmpty() || chatSession.isBusy()) {
+            return;
+        }
+        List<Path> imageFiles = files.stream().filter(AIChatControl::isImageFile).toList();
+        if (!imageFiles.isEmpty() && promptComposite != null) {
+            UUID conversationId = activeConversation.getId();
+            promptComposite.imageLoadingStarted(conversationId);
+            new AbstractJob(AIChatMessagesUI.ai_chat_image_loading) {
+                @NotNull
+                @Override
+                protected IStatus run(@NotNull DBRProgressMonitor monitor) {
+                    List<AIImageAttachment> attachments = new ArrayList<>();
+                    try {
+                        if (imageFiles.size() > AIImageAttachment.MAX_IMAGES) {
+                            throw new IOException(AIChatMessagesUI.ai_chat_image_limit);
+                        }
+                        int totalBytes = 0;
+                        for (Path file : imageFiles) {
+                            if (monitor.isCanceled()) {
+                                return Status.CANCEL_STATUS;
+                            }
+                            byte[] bytes;
+                            try (InputStream input = Files.newInputStream(file)) {
+                                bytes = input.readNBytes(AIImageAttachment.MAX_IMAGE_BYTES + 1);
+                            }
+                            totalBytes += bytes.length;
+                            if (totalBytes > AIImageAttachment.MAX_IMAGE_BYTES) {
+                                throw new IOException(AIChatMessagesUI.ai_chat_image_limit);
+                            }
+                            attachments.add(AIImageAttachment.fromBytes(file.getFileName().toString(), bytes));
+                        }
+                        UIUtils.asyncExec(() -> {
+                            if (!isDisposed()) {
+                                promptComposite.addImages(conversationId, attachments);
+                            }
+                        });
+                        return Status.OK_STATUS;
+                    } catch (Exception exception) {
+                        UIUtils.asyncExec(() -> {
+                            if (!isDisposed()) {
+                                DBWorkbench.getPlatformUI().showError(
+                                    AIChatMessagesUI.ai_chat_image_error, AIChatMessagesUI.ai_chat_image_load_error, exception);
+                            }
+                        });
+                        return Status.CANCEL_STATUS;
+                    } finally {
+                        UIUtils.asyncExec(() -> {
+                            if (!isDisposed()) {
+                                promptComposite.imageLoadingFinished(conversationId);
+                            }
+                        });
+                    }
+                }
+            }.schedule();
+        }
+        List<Path> otherFiles = files.stream().filter(file -> !isImageFile(file)).toList();
+        if (otherFiles.isEmpty()) {
+            return;
+        }
+        AIChatMessage message = activeConversation.addMessage(new AIMessageFiles(otherFiles));
+        chatSession.notifyMessageAdd(activeConversation, message);
+    }
+
+    /**
+     * Finds the AI chat conversation associated with the given SQL query in the specified editor
+     * or creates a new conversation if none exists.
+     *
+     * @param editor          the SQL editor containing the query
+     * @param query           the SQL script element to find or associate a conversation with
+     * @param newConversation the conversation to associate if none already exists
+     * @return the found or newly associated AI chat conversation
+     */
+    @NotNull
+    public AIChatConversation findOrCreateAssociatedConversation(
+        @NotNull SQLEditor editor,
+        @NotNull SQLScriptElement query,
+        @NotNull AIChatConversation newConversation
+    ) throws DBException {
+        IAnnotationModel annotationModel = editor.getAnnotationModel();
+        if (annotationModel == null) {
+            return newConversation;
+        }
+        UUID associatedConversationId = getAssociatedConversationId(annotationModel, query);
+        if (associatedConversationId != null) {
+            AIChatConversation associatedConversation = chatSession.getConversation(associatedConversationId);
+            if (associatedConversation != null) {
+                return associatedConversation;
+            }
+        }
+
+        annotationModel.addAnnotation(
+            new AIChatAnnotation(newConversation.getId()),
+            new Position(query.getOffset(), query.getLength())
+        );
+        return newConversation;
+    }
+
+    /**
+     * Retrieves the conversation ID associated with the given SQL script element
+     * from the provided annotation model, if present.
+     *
+     * @param annotationModel the annotation model to search
+     * @param query           the SQL script element to match
+     * @return the associated conversation ID, or {@code null} if none found
+     */
+    @Nullable
+    private UUID getAssociatedConversationId(
+        @NotNull IAnnotationModel annotationModel,
+        @NotNull SQLScriptElement query
+    ) {
+        Iterator<Annotation> iterator = annotationModel.getAnnotationIterator();
+        while (iterator.hasNext()) {
+            Annotation annotation = iterator.next();
+            Position position = annotationModel.getPosition(annotation);
+            if (annotation instanceof AIChatAnnotation aiChatAnnotation &&
+                position != null &&
+                position.getOffset() == query.getOffset() &&
+                position.getLength() == query.getLength()
+            ) {
+                return aiChatAnnotation.getConversationId();
+            }
+        }
+        return null;
+    }
+
+    @NotNull
+    private Control createMessageListControl(@NotNull Composite parent) {
+        try {
+            AIChatMessageListDescriptor descriptor = AIChatMessageListRegistry.getInstance().getMessageListDescriptor();
+            messageList = descriptor != null
+                ? descriptor.createMessageList(this, parent)
+                : new WebViewMessageList(this, parent);
+            return messageList;
+        } catch (DBException | IOException e) {
+            log.error("Error creating AI chat message list", e);
+        }
+
+        return UIUtils.createLabel(parent, "Internal error creating web chat. See logs.");
+    }
+
+    public void attachImage(@NotNull ImageData image) {
+        if (chatSession.isBusy()) {
+            return;
+        }
+        try {
+            ImageLoader loader = new ImageLoader();
+            loader.data = new ImageData[]{image};
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            loader.save(output, SWT.IMAGE_PNG);
+            attachImage(AIImageAttachment.fromBytes(AIChatMessagesUI.ai_chat_image_clipboard_name, output.toByteArray()));
+        } catch (Exception exception) {
+            DBWorkbench.getPlatformUI().showError(
+                AIChatMessagesUI.ai_chat_image_error, AIChatMessagesUI.ai_chat_image_load_error, exception);
+        }
+    }
+
+    public void attachImage(@NotNull AIImageAttachment image) {
+        if (promptComposite != null) {
+            promptComposite.addImages(List.of(image));
+        }
+    }
+
+    public static boolean isImageFile(@NotNull Path path) {
+        String name = path.getFileName().toString().toLowerCase(Locale.ROOT);
+        int dotIndex = name.lastIndexOf('.');
+        return dotIndex >= 0 && Set.of("png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff", "svg", "avif", "ico")
+            .contains(name.substring(dotIndex + 1));
+    }
+
+    void enableDragAndDrop(@NotNull Control control) {
+        int operations = DND.DROP_DEFAULT | DND.DROP_MOVE | DND.DROP_COPY | DND.DROP_LINK;
+        DropTarget dropTarget = new DropTarget(control, operations);
+        dropTarget.setTransfer(FileTransfer.getInstance(), ImageTransfer.getInstance(), TextTransfer.getInstance());
+        dropTarget.addDropListener(new DropTargetAdapter() {
+            @Override
+            public void dragEnter(@NotNull DropTargetEvent event) {
+                handleDragEvent(event);
+            }
+
+            @Override
+            public void dragOver(@NotNull DropTargetEvent event) {
+                handleDragEvent(event);
+            }
+
+            @Override
+            public void dragOperationChanged(@NotNull DropTargetEvent event) {
+                handleDragEvent(event);
+            }
+
+            @Override
+            public void drop(@NotNull DropTargetEvent event) {
+                if (event.data instanceof String text && control instanceof StyledText styledText && styledText.getEditable()) {
+                    styledText.insert(text);
+                    return;
+                }
+                if (event.data instanceof ImageData image) {
+                    attachImage(image);
+                    return;
+                }
+                if (event.data instanceof String[] filePaths && filePaths.length > 0) {
+                    List<Path> files = new ArrayList<>();
+                    for (String p : filePaths) {
+                        if (p != null) {
+                            files.add(Path.of(p));
+                        }
+                    }
+                    attachFiles(files);
+                }
+            }
+
+            private void handleDragEvent(@NotNull DropTargetEvent event) {
+                if (!isDropSupported(event)) {
+                    event.detail = DND.DROP_NONE;
+                } else if (!TextTransfer.getInstance().isSupportedType(event.currentDataType) || event.detail == DND.DROP_DEFAULT) {
+                    event.detail = (event.operations & DND.DROP_COPY) != 0 ? DND.DROP_COPY : DND.DROP_NONE;
+                }
+            }
+
+            private boolean isDropSupported(@NotNull DropTargetEvent event) {
+                return !chatSession.isBusy() && (FileTransfer.getInstance().isSupportedType(event.currentDataType)
+                    || ImageTransfer.getInstance().isSupportedType(event.currentDataType)
+                    || control instanceof StyledText styledText && styledText.getEditable()
+                        && TextTransfer.getInstance().isSupportedType(event.currentDataType));
+            }
+        });
+    }
+
+    private boolean canDescribeDroppedObjects() {
+        return !isBusy() && !isWaitingForResponse() && ActionUtils.findCommand(AIChatController.CMD_DESCRIBE_OBJECT) != null;
+    }
+
+    protected boolean canDescribeDroppedObjects(@Nullable Collection<?> objects) {
+        if (objects == null || objects.isEmpty() || !canDescribeDroppedObjects()) {
+            return false;
+        }
+        DBSObject firstObject = null;
+        for (Object object : objects) {
+            if (!(object instanceof DBNDatabaseNode node)) {
+                return false;
+            }
+            DBSObject databaseObject = node.getObject();
+            if (!AIUtils.isEligible(databaseObject) || databaseObject.getDataSource() == null) {
+                return false;
+            }
+            if (firstObject != null && (databaseObject.getDataSource() != firstObject.getDataSource()
+                || databaseObject.getClass() != firstObject.getClass())) {
+                return false;
+            }
+            firstObject = databaseObject;
+        }
+        return true;
+    }
+
+    protected boolean canAttachDroppedFiles(@Nullable Collection<?> objects) {
+        if (objects == null || objects.isEmpty()) {
+            return false;
+        }
+        for (Object object : objects) {
+            if (!(object instanceof DBNNode node) || object instanceof DBNDatabaseNode || !(object instanceof DBNStreamData streamData)) {
+                return false;
+            }
+            if (!streamData.supportsStreamData()) {
+                // local workspace files are transferred by path
+                try {
+                    if (!Files.isRegularFile(Path.of(node.getNodeTargetName()))) {
+                        return false;
+                    }
+                } catch (InvalidPathException e) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    protected void updateDropEvent(@NotNull DropTargetEvent event) {
+        event.detail = DND.DROP_NONE;
+        if (isBusy() || isWaitingForResponse()) {
+            return;
+        }
+        Collection<DBNNode> draggedNodes = TreeNodeTransfer.getInstance().getDraggedNodes();
+        if (canDescribeDroppedObjects(draggedNodes)) {
+            for (TransferData dataType : event.dataTypes) {
+                if (TreeNodeTransfer.getInstance().isSupportedType(dataType)) {
+                    event.currentDataType = dataType;
+                    event.detail = DND.DROP_COPY;
+                    return;
+                }
+            }
+            return;
+        }
+        if (draggedNodes != null && !canAttachDroppedFiles(draggedNodes)) {
+            return;
+        }
+        for (TransferData dataType : event.dataTypes) {
+            if (FileTransfer.getInstance().isSupportedType(dataType)) {
+                event.currentDataType = dataType;
+                event.detail = DND.DROP_COPY;
+                return;
+            }
+        }
+        for (TransferData dataType : event.dataTypes) {
+            if (ImageTransfer.getInstance().isSupportedType(dataType)) {
+                event.currentDataType = dataType;
+                event.detail = DND.DROP_COPY;
+                return;
+            }
+        }
+    }
+
+    protected void describeDroppedObjects(@NotNull Collection<?> objects) {
+        if (!canDescribeDroppedObjects(objects)) {
+            return;
+        }
+        List<DBNDatabaseNode> nodes = objects.stream()
+            .map(DBNDatabaseNode.class::cast)
+            .toList();
+        ActionUtils.runCommand(
+            AIChatController.CMD_DESCRIBE_OBJECT,
+            new StructuredSelection(nodes),
+            null,
+            Map.of(AIChatController.CONTEXT_CHAT_CONTROL, this),
+            controller.getSite()
+        );
+    }
+
+    @NotNull
+    private ContextComposite createContextControl(@NotNull Composite parent) {
+        ContextComposite composite = new ContextComposite(this, parent);
+        composite.setBackgroundMode(SWT.INHERIT_DEFAULT);
+        composite.setLayoutData(new GridData(SWT.FILL, SWT.BEGINNING, true, false));
+        return composite;
+    }
+
+    @NotNull
+    private PromptComposite createPromptControl(@NotNull Composite parent) {
+        PromptComposite composite = new PromptComposite(this, parent);
+        composite.setBackgroundMode(SWT.INHERIT_DEFAULT);
+        composite.setLayoutData(new GridData(SWT.FILL, SWT.END, true, false));
+        return composite;
+    }
+}

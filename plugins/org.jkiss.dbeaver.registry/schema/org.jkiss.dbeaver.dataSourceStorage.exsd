@@ -1,0 +1,50 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<schema targetNamespace="org.jkiss.dbeaver.registry" xmlns="http://www.w3.org/2001/XMLSchema">
+<annotation>
+      <appInfo>
+         <meta.schema plugin="org.jkiss.dbeaver.registry" id="org.jkiss.dbeaver.dataSourceStorage" name="Datasource configuration storage"/>
+      </appInfo>
+      <documentation>DBeaver data source provider</documentation>
+   </annotation>
+
+   <element name="extension">
+      <annotation><appInfo><meta.element/></appInfo></annotation>
+      <complexType>
+         <sequence>
+            <element ref="storage" minOccurs="0" maxOccurs="unbounded"/>
+         </sequence>
+         <attribute name="point" type="string" use="required"/>
+         <attribute name="id" type="string">
+            <annotation>
+               <documentation>Storage ID</documentation>
+            </annotation>
+         </attribute>
+         <attribute name="name" type="string">
+            <annotation>
+               <appInfo>
+                  <meta.attribute translatable="true"/>
+               </appInfo>
+            </annotation>
+         </attribute>
+      </complexType>
+   </element>
+
+   <element name="storage">
+      <annotation>
+         <documentation>Data source configuration storage implementation binding</documentation>
+      </annotation>
+      <complexType>
+         <attribute name="id" type="string" use="required"/>
+         <attribute name="class" type="string" use="required">
+            <annotation><appInfo><meta.attribute kind="java" basedOn=":org.jkiss.dbeaver.model.DBPDataSourceConfigurationStorage"/></appInfo></annotation>
+         </attribute>
+         <attribute name="label" type="string"/>
+         <attribute name="description" type="string"/>
+         <attribute name="icon" type="string"/>
+      </complexType>
+   </element>
+
+
+
+
+</schema>

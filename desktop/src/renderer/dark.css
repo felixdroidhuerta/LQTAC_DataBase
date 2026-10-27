@@ -1,0 +1,33 @@
+html[data-theme=dark] { color-scheme:dark;color:#d7e2ee;background:#101721;--border:#334251;--blue:#53b4ff; }
+html[data-theme=dark] body,html[data-theme=dark] main,html[data-theme=dark] .view { background:#141e2a;color:#d7e2ee; }
+html[data-theme=dark] :is(.sidebar,.topbar,footer,.editor-toolbar,.results,.card,.module-row,.profile-row,.secondary,dialog,.connection-menu,.completion-panel,.outputs-panel,.relation-card) { background:#1b2838;color:#d7e2ee;border-color:#34475c; }
+html[data-theme=dark] :is(.brand-name,h1,h2,h3,.editor-toolbar strong,.results-header strong,.section-heading h2) { color:#e3edf8; }
+html[data-theme=dark] :is(input,select,textarea,.explorer-search,.editor-caption,.results-header,.outputs-title,.editor-note,.designer-subtabs,.designer-properties,.designer-footer,.mini-tools) { background:#1b2838;color:#c9daed;border-color:#34475c; }
+html[data-theme=dark] :is(th,#results th) { background:#24394c;color:#dbeafa;box-shadow:0 1px #405164; }
+html[data-theme=dark] :is(td,th) { border-color:#304256; }
+html[data-theme=dark] tbody tr:nth-child(even) { background:#1d2e40; }
+html[data-theme=dark] :is(#results tbody tr:hover,.nav.active,.tree-object:hover,.connection-row.active,button.mini-tool:hover) { background:#244765;color:#a8daff; }
+html[data-theme=dark] :is(.lab,.card-icon,.note,.profile-hint,.relations-scroll) { background:#1b3046;color:#a9bfd6;border-color:#34475c; }
+html[data-theme=dark] :is(.panel-splitter,.outputs-resize) { background-color:#34475c; }
+html[data-theme=dark] .mini-tools { border-color:#40556b; }html[data-theme=dark] .mini-tools>* { border-color:#40556b;color:#b8d8f3; }
+html[data-theme=dark] .tool-tip { background:#263d54;color:#e5f1fc;border-color:#507595; }
+html[data-theme=dark] .sql-source-input { background:transparent;color:transparent;caret-color:#e0f0ff; }
+html[data-theme=dark] .sql-composing .sql-source-input { color:#e0f0ff; }
+html[data-theme=dark] :is(.sql-source-surface,.sql-source-surface .sql-highlight-layer) { background:#152232; }
+html[data-theme=dark] .sql-highlight-code { color:#c8d9eb; }
+html[data-theme=dark] .sql-source-surface.sql-composing textarea.sql-source-input { color:#e0f0ff!important;-webkit-text-fill-color:#e0f0ff; }
+html[data-theme=dark] :is(.connection-context,.profiles-empty,.query-tab.active) { background:#24394c;color:#dbeafa;border-color:#40556b; }
+html[data-theme=dark] :is(.connection-row.selected,.connection-row.active-connection,.completion-option.selected,.connection-row:hover) { background:#244765;color:#b9deff; }
+html[data-theme=dark] .connection-name { color:#bed4eb; }
+html[data-theme=dark] .tabs { background:#162231;border-color:#34475c; }
+html[data-theme=dark] .query-tab { background:#1b2a3b;border-right-color:#34475c; }
+html[data-theme=dark] .tabs .tab { background:transparent;color:#c9daed;border-right-color:#34475c; }
+html[data-theme=dark] :is(.tabs>.tab.active,.query-tab.active) { background:#2b455f;color:#f0f6ff;border-top-color:#64bcff; }
+html[data-theme=dark] .query-tab.active .tab { color:#f0f6ff; }
+html[data-theme=dark] :is(.tabs>.tab:hover,.query-tab:not(.active):hover) { background:#253c53; }
+html[data-theme=dark] .query-tab .tab-close { color:#b4cae1; }
+html[data-theme=dark] .query-tab .tab-close:hover { background:#385977;color:#fff; }
+html[data-theme=dark] .tabs button:focus-visible { outline:2px solid #64bcff;outline-offset:-3px; }
+html[data-theme=dark] :is(#connection-form input,#connection-form select,#connection-password,#connection-group-name) { background:#152232;color:#d7e2ee;border-color:#40556b; }
+html[data-theme=dark] .sql-token-keyword { color:#6cbaff; }html[data-theme=dark] .sql-token-identifier { color:#b0dfeb; }html[data-theme=dark] .sql-token-string { color:#efb18e; }html[data-theme=dark] .sql-token-number { color:#add9a5; }html[data-theme=dark] .sql-token-comment { color:#82aa78; }html[data-theme=dark] .sql-token-type { color:#c9a5f2; }html[data-theme=dark] .sql-token-function { color:#e5cf8e; }
+@media(forced-colors:active) { html[data-theme=dark] .sql-source-surface textarea.sql-source-input {color:CanvasText!important;-webkit-text-fill-color:CanvasText;caret-color:CanvasText;} }

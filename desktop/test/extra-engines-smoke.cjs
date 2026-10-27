@@ -1,0 +1,58 @@
+const { app, BrowserWindow } = require('electron');
+const assert = require('node:assert/strict');
+const { mkdtempSync } = require('node:fs');
+const { tmpdir } = require('node:os');
+const { join } = require('node:path');
+const { startClickHouseFixture, startMongoFixture } = require('./extra-engines-fixture.cjs');
+app.setPath('userData', mkdtempSync(join(tmpdir(), 'lqtac-extra-engines-')));
+require('../src/main.cjs');
+const timeout = setTimeout(() => { console.error('Extra engines smoke timed out'); app.exit(1); }, 30000);
+app.whenReady().then(async () => {
+  const window = BrowserWindow.getAllWindows()[0]; window.webContents.setBackgroundThrottling(false);
+  const clickhouse = await startClickHouseFixture(); const mongo = await startMongoFixture();
+  try {
+    if (window.webContents.isLoading()) await new Promise(resolve => window.webContents.once('did-finish-load', resolve));
+    const js = code => window.webContents.executeJavaScript(code);
+    const until = condition => js(`new Promise((resolve,reject)=>{const start=Date.now();const poll=()=>{if(${condition})return resolve();if(Date.now()-start>8000)return reject(new Error(${JSON.stringify(condition)}));setTimeout(poll,30)};poll()})`);
+    await js('document.querySelector("#new-connection-home").click()');
+    await js(`document.querySelector('#connection-form').elements.engine.value='clickhouse';document.querySelector('#connection-form').elements.engine.dispatchEvent(new Event('change'))`);
+    assert.equal(await js('document.querySelector("#connection-form").elements.port.value'), '8123');
+    await js(`document.querySelector('#connection-form').elements.tls.checked=true;document.querySelector('#connection-form').elements.tls.dispatchEvent(new Event('change'))`);
+    assert.equal(await js('document.querySelector("#connection-form").elements.port.value'), '8443');
+    await js(`document.querySelector('#connection-form').elements.engine.value='mongodb';document.querySelector('#connection-form').elements.engine.dispatchEvent(new Event('change'))`);
+    assert.equal(await js('document.querySelector("#connection-form").elements.port.value'), '27017');
+    assert.equal(await js('document.querySelector("#connection-form").elements.username.required'), false);
+    assert.equal(await js('document.querySelector("#mongo-auth-source").classList.contains("hidden")'), false);
+    await js('document.querySelector("#cancel-profile").click()');
+    for (const fixture of [clickhouse, mongo]) await js(`window.lqtac.saveConnection(${JSON.stringify(fixture.profile)})`);
+    await js('document.querySelector("[data-view=connections]").click()');
+    await until('document.querySelectorAll(".profile-row").length===2');
+    const connect = async name => {
+      await js(`[...document.querySelectorAll('.profile-row')].find(row=>row.querySelector('h3').textContent===${JSON.stringify(name)}).querySelector('.primary').click()`);
+      await until('document.querySelector("#credentials-dialog").open');
+      await js('document.querySelector("#credentials-form").requestSubmit()');
+      await until(`document.querySelector('#connection-label').textContent===${JSON.stringify(name)} && !document.querySelector('#credentials-dialog').open`);
+    };
+    await connect(clickhouse.profile.name);
+    assert.equal(await js('document.querySelector("#sql-dialect").textContent'), 'SQL / ClickHouse');
+    await js('document.querySelector("#run-query").click()'); await until('document.querySelector("#results tbody td")');
+    assert.equal(await js('document.querySelector("#results tbody td").textContent'), '0');
+    await js('document.querySelector("[data-view=connections]").click()'); await until('document.querySelectorAll(".profile-row").length===2');
+    await connect(mongo.profile.name);
+    assert.equal(await js('document.querySelector("#sql-dialect").textContent'), 'JSON / MongoDB');
+    assert.deepEqual(JSON.parse(await js('document.querySelector("#query").value')), { ping: 1 });
+    await until('document.querySelector(".tree-object[data-type=collection]")');
+    await js('document.querySelector(".tree-object[data-type=collection]").click()');
+    await until('document.querySelector("#query").value.includes("find")');
+    const command = JSON.parse(await js('document.querySelector("#query").value')); assert.equal(command.find, 'clientes'); assert.equal(command.$db, 'test');
+    await js('document.querySelector("#run-query").click()'); await until('document.querySelector("#results tbody")?.textContent.includes("Ana")');
+    assert.equal(await js('document.querySelector(".sql-highlight-layer").textContent.slice(0,-1)===document.querySelector("#query").value'), true);
+    assert.equal(await js(`document.querySelector('.sql-highlight-layer .sql-token-identifier').textContent`), '"find"');
+    await js(`document.querySelector('#query').value='{"find":"cl","filter":{}}';document.querySelector('#query').focus();document.querySelector('#query').setSelectionRange(11,11);document.querySelector('#query').dispatchEvent(new Event('input',{bubbles:true}))`);
+    await until('document.querySelector(".completion-option")');
+    assert.match(await js('document.querySelector(".completion-option").textContent'), /clientes.*Colección/);
+    const overview = await js('window.lqtac.connectionOverview()'); assert.equal(overview.sessions.filter(item => item.connected).length, 2);
+    console.log('PASS: ClickHouse and MongoDB profile forms, native driver IPC, independent sessions, SQL/JSON editors, collections, results and completions');
+    clearTimeout(timeout); await clickhouse.close(); await mongo.close(); app.exit(0);
+  } catch (error) { console.error(error); clearTimeout(timeout); await clickhouse.close(); await mongo.close(); app.exit(1); }
+});

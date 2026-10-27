@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.2"?>
+
+<plugin>
+
+    <extension point="org.jkiss.dbeaver.dataSourceConfigurator">
+        <configurator dataSource="hana" class="org.jkiss.dbeaver.ext.hana.ui.views.HANAConnectionPage"/>
+    </extension>
+
+    <extension point="org.jkiss.dbeaver.databaseEditor">
+        <configurator class="org.jkiss.dbeaver.ext.hana.ui.config.HANASchemaConfigurator">
+            <objectType name="org.jkiss.dbeaver.ext.hana.model.HANASchema"/>
+        </configurator>
+    </extension>
+
+</plugin>

@@ -1,0 +1,41 @@
+{
+  "name": "lqtac-database",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LQTAC Data Base — espacio de trabajo modular para bases de datos",
+  "main": "src/main.cjs",
+  "scripts": {
+    "build:portable": "node scripts/build-portable.cjs",
+    "postinstall": "install-electron",
+    "start": "electron .",
+    "test": "node --test test/*.test.cjs",
+    "test:desktop": "electron test/desktop-smoke.cjs",
+    "test:layout": "electron test/layout-smoke.cjs",
+    "test:designer": "electron test/table-designer-smoke.cjs",
+    "test:connections": "electron test/connection-navigator-smoke.cjs",
+    "test:syntax": "electron test/syntax-smoke.cjs",
+    "test:engines": "electron test/extra-engines-smoke.cjs",
+    "test:sql-engines": "electron test/sql-engines-smoke.cjs",
+    "test:outputs": "electron test/outputs-smoke.cjs",
+    "test:query-tools": "electron test/query-tools-smoke.cjs",
+    "test:objects": "electron test/columns-objects-smoke.cjs",
+    "test:results": "electron test/results-grid-smoke.cjs",
+    "test:workflow": "electron test/copy-files-reconnect-smoke.cjs",
+    "test:statements": "electron test/statement-runner-smoke.cjs"
+  },
+  "dependencies": {
+    "mysql2": "3.24.6",
+    "@clickhouse/client": "1.24.1",
+    "mongodb": "7.7.0",
+    "pg": "8.23.1",
+    "tedious": "19.2.2",
+    "oracledb": "26.0.0",
+    "sql.js": "1.15.1",
+    "sql-formatter": "15.9.0",
+    "exceljs": "4.4.0"
+  },
+  "devDependencies": {
+    "electron": "45.0.0"
+  },
+  "overrides": { "tedious": { "@azure/identity": "4.13.0" }, "@azure/msal-node": { "uuid": "11.1.1" }, "exceljs": { "uuid": "11.1.1" } }
+}

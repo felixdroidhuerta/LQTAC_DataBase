@@ -1,0 +1,13 @@
+#object-editor-dialog { width:1100px;max-width:calc(100vw - 60px);height:82vh;max-height:1000px;padding:22px; }
+#object-editor-dialog[open] { display:flex;flex-direction:column;gap:10px; }
+#object-editor-dialog h2,#object-editor-dialog p { margin:0; }
+#object-fields { display:flex;flex-direction:column;flex:1;min-height:150px;gap:7px; }
+#object-fields>label { font-size:12px; }
+#object-fields .sql-source-surface { flex:1;min-height:120px;border:1px solid var(--border); }
+#object-source { height:100%;max-height:none;min-height:120px;resize:none;padding:12px;font:13px/1.7 Consolas,monospace; }
+#object-review { max-height:30%;overflow:auto;border:1px solid var(--border);padding:8px;font-size:12px; }
+#object-review[hidden] { display:none; }
+#object-review pre { white-space:pre;overflow:auto; }
+#object-message { white-space:pre-wrap;font-size:12px;max-height:90px;overflow:auto; }
+#object-editor-dialog .object-actions { display:flex;justify-content:flex-end;gap:9px;margin:0; }
+.edit-object { font-size:12px;color:#078bea;padding:5px; }

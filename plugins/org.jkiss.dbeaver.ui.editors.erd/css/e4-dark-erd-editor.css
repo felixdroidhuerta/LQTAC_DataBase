@@ -1,0 +1,35 @@
+ColorDefinition#org-jkiss-dbeaver-erd-diagram-background {
+    color: #2f2f2f;
+}
+
+ColorDefinition#org-jkiss-dbeaver-erd-diagram-entity-regular-background {
+    color: #202020;
+}
+
+ColorDefinition#org-jkiss-dbeaver-erd-diagram-entity-primary-background {
+    color: #804020;
+}
+
+ColorDefinition#org-jkiss-dbeaver-erd-diagram-entity-association-background,
+ColorDefinition#org-jkiss-dbeaver-erd-diagram-attributes-background,
+ColorDefinition#org-jkiss-dbeaver-erd-diagram-notes-background {
+    color: #404040;
+}
+
+ColorDefinition#org-jkiss-dbeaver-erd-diagram-entity-name-foreground,
+ColorDefinition#org-jkiss-dbeaver-erd-diagram-attributes-foreground,
+ColorDefinition#org-jkiss-dbeaver-erd-diagram-notes-foreground {
+    color: #c4c4c4;
+}
+
+ColorDefinition#org-jkiss-dbeaver-erd-diagram-search-highlighting {
+    color: #9b8200;
+}
+
+ColorDefinition#org-jkiss-dbeaver-erd-diagram-fk-highlighting {
+    color: #417d23;
+}
+
+ColorDefinition#org-jkiss-dbeaver-erd-diagram-lines-foreground {
+    color: #0064ae;
+}

@@ -1,0 +1,54 @@
+const { app, BrowserWindow } = require('electron');
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+const assert = require('node:assert/strict');
+const { mkdtempSync } = require('node:fs');
+const { tmpdir } = require('node:os');
+const { join } = require('node:path');
+app.setPath('userData',mkdtempSync(join(tmpdir(),'lqtac-outputs-')));
+require('../src/main.cjs');
+const timeout=setTimeout(()=>{console.error('Outputs timed out');app.exit(1);},30000);
+app.whenReady().then(async()=>{
+  const window=BrowserWindow.getAllWindows()[0];window.webContents.setBackgroundThrottling(false);
+  try {
+    if(window.webContents.isLoading())await new Promise(resolve=>window.webContents.once('did-finish-load',resolve));
+    const js=code=>window.webContents.executeJavaScript(code);
+    const until=condition=>js(`new Promise((resolve,reject)=>{const start=Date.now();const poll=()=>{if(${condition})return resolve();if(Date.now()-start>6000)return reject(new Error(${JSON.stringify(condition)}));setTimeout(poll,25)};poll()})`);
+    const settled=()=>js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+    const rect=selector=>js(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height}})()`);
+    const choose=async dock=>{await js(`document.querySelector('#outputs-location').value=${JSON.stringify(dock)};document.querySelector('#outputs-location').dispatchEvent(new Event('change'))`);await settled();};
+    const drag=async(from,to)=>{window.webContents.sendInputEvent({type:'mouseDown',x:Math.round(from.x),y:Math.round(from.y),button:'left',clickCount:1});window.webContents.sendInputEvent({type:'mouseMove',x:Math.round((from.x+to.x)/2),y:Math.round((from.y+to.y)/2),button:'left'});await settled();window.webContents.sendInputEvent({type:'mouseMove',x:Math.round(to.x),y:Math.round(to.y),button:'left'});await settled();window.webContents.sendInputEvent({type:'mouseUp',x:Math.round(to.x),y:Math.round(to.y),button:'left',clickCount:1});await settled();};
+    await js('document.querySelector("#demo-lab").click()');await until('document.querySelector("#connection-label").textContent.includes("Laboratorio")');
+    assert.equal(await js('document.querySelector("#outputs-toggle").getAttribute("aria-expanded")'),'false');
+    assert.equal(await js('document.querySelector("#outputs-panel").dataset.dock'),'bottom');
+    await js(`document.querySelector('#query').value='SELECT 1 AS id';document.querySelector('#query').dispatchEvent(new Event('input'));document.querySelector('#run-query').click()`);
+    await until('document.querySelector("#outputs-body tr[data-status=success]")');
+    await js(`document.querySelector('#query').value='SELECT * FROM missing_table';document.querySelector('#query').dispatchEvent(new Event('input'));document.querySelector('#run-query').click()`);
+    await until('document.querySelector("#outputs-body tr[data-status=error]")');
+    assert.match(await js('document.querySelector("#outputs-body").textContent'),/missing_table/);
+    assert.equal(await js('document.querySelector("#outputs-toggle").getAttribute("aria-expanded")'),'false');
+    console.log('Outputs: history ready');
+    await js('document.querySelector("#outputs-toggle").click()');await settled();
+    console.log('Outputs: expanded');
+    let resize=await rect('.outputs-resize');const height=(await rect('#outputs-panel')).height;
+    await drag({x:resize.x+100,y:resize.y+2},{x:resize.x+100,y:resize.y-45});assert.ok((await rect('#outputs-panel')).height>height+20);
+    console.log('Outputs: resized');
+    for(const dock of ['top','left','right','floating','bottom']){await choose(dock);console.log('Outputs: '+dock);assert.equal(await js('document.querySelector("#outputs-panel").dataset.dock'),dock);assert.ok((await rect('#results')).height>=79);}
+    let header=await rect('.outputs-title');let stage=await rect('#sql-stage');
+    await drag({x:header.x+80,y:header.y+16},{x:stage.x+stage.width/2,y:stage.y+stage.height/2});
+    console.log('Outputs: dragged floating');
+    assert.equal(await js('document.querySelector("#outputs-panel").dataset.dock'),'floating');
+    header=await rect('.outputs-title');stage=await rect('#sql-stage');
+    await drag({x:header.x+80,y:header.y+16},{x:stage.x+5,y:stage.y+stage.height/2});
+    console.log('Outputs: dragged left');
+    assert.equal(await js('document.querySelector("#outputs-panel").dataset.dock'),'left');
+    await choose('bottom');await js('document.querySelector("#outputs-toggle").click()');
+    window.webContents.reload();await new Promise(resolve=>window.webContents.once('did-finish-load',resolve));
+    console.log('Outputs: reloaded');
+    await js('document.querySelector(".nav[data-view=sql]").click()');await settled();
+    assert.equal(await js('document.querySelector("#outputs-panel").dataset.dock'),'bottom');
+    assert.equal(await js('document.querySelector("#outputs-toggle").getAttribute("aria-expanded")'),'false');
+    assert.equal(await js('document.querySelectorAll("#outputs-body tbody tr").length'),0);
+    console.log('PASS: success/error outputs, collapsed default, resizing, five docking positions, real pointer drag floating/dock, persistent layout and session-only history');
+    clearTimeout(timeout);app.exit(0);
+  }catch(error){console.error(error);clearTimeout(timeout);app.exit(1);}
+});

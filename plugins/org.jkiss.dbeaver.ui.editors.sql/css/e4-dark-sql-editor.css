@@ -1,0 +1,80 @@
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-schema-foreground {
+    color: #cc9b75;
+}
+
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-column-derived-foreground,
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-column-foreground {
+    color: #00b8b8;
+}
+
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-table-alias-foreground,
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-table-foreground {
+    color: #b788d3;
+}
+
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-composite-field-foreground {
+    color: #d7b98c;
+}
+
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-semanticError-foreground {
+    color: #b19b9b;
+}
+
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-text-foreground {
+    color: #9e9e9e;
+}
+
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-text-background,
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-disabled-background {
+    color: #000000;
+}
+
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-keyword-foreground {
+    color: #739eca;
+}
+
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-datatype-foreground,
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-function-foreground {
+    color: #c1aa6c;
+}
+
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-string-foreground {
+    color: #cac580;
+}
+
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-number-foreground {
+    color: #c0c0c0;
+}
+
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-comment-foreground {
+    color: #669768;
+}
+
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-delimiter-foreground {
+    color: #eecc64;
+}
+
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-parameter-foreground,
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-sqlVariable-foreground {
+    color: #7ebad3;
+}
+
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-command-foreground {
+    color: #d3bad3;
+}
+
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-aiSuggestion-foreground {
+    color: #a8a8a8;
+}
+
+ColorDefinition#org-jkiss-dbeaver-sql-editor-color-aiSuggestion-background {
+    color: #373737;
+}
+
+ColorDefinition#org-jkiss-dbeaver-ui-general-color-warning-foreground {
+    color: #e6c850;
+}
+
+ColorDefinition#org-jkiss-dbeaver-ui-general-color-error-foreground {
+    color: #ff7878;
+}

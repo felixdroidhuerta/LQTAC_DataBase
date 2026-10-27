@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.2"?>
+
+<plugin>
+
+    <extension point="org.jkiss.dbeaver.dataSourceConfigurator">
+        <configurator dataSource="athena" class="org.jkiss.dbeaver.ext.athena.ui.views.AthenaConnectionPage"/>
+    </extension>
+
+</plugin>

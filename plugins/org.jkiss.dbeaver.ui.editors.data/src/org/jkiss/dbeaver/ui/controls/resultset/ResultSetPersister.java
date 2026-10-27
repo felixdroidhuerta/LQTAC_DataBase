@@ -1,0 +1,816 @@
+/*
+ * DBeaver - Universal Database Manager
+ * Copyright (C) 2010-2026 DBeaver Corp and others
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.jkiss.dbeaver.ui.controls.resultset;
+
+import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.Status;
+import org.eclipse.osgi.util.NLS;
+import org.jkiss.code.NotNull;
+import org.jkiss.code.Nullable;
+import org.jkiss.dbeaver.DBException;
+import org.jkiss.dbeaver.Log;
+import org.jkiss.dbeaver.ModelPreferences;
+import org.jkiss.dbeaver.model.*;
+import org.jkiss.dbeaver.model.data.*;
+import org.jkiss.dbeaver.model.data.resultset.*;
+import org.jkiss.dbeaver.model.exec.*;
+import org.jkiss.dbeaver.model.impl.AbstractExecutionSource;
+import org.jkiss.dbeaver.model.runtime.DBRProgressMonitor;
+import org.jkiss.dbeaver.model.sql.RowDataReceiver;
+import org.jkiss.dbeaver.model.struct.*;
+import org.jkiss.dbeaver.model.struct.rdb.DBSForeignKeyModifyRule;
+import org.jkiss.dbeaver.model.struct.rdb.DBSManipulationType;
+import org.jkiss.dbeaver.model.struct.rdb.DBSTableForeignKey;
+import org.jkiss.dbeaver.runtime.DBWorkbench;
+import org.jkiss.dbeaver.ui.UITask;
+import org.jkiss.dbeaver.ui.UIUtils;
+import org.jkiss.dbeaver.ui.controls.resultset.internal.ResultSetMessages;
+import org.jkiss.dbeaver.ui.dialogs.ConfirmationDialog;
+import org.jkiss.dbeaver.utils.GeneralUtils;
+import org.jkiss.utils.CommonUtils;
+
+import java.util.*;
+
+/**
+ * Result set data updater
+ */
+class ResultSetPersister extends DBDResultSetDataUpdater<ResultSetPersister.DataStatementInfo, ResultSetRow, ResultSetModel> {
+
+    private static final Log log = Log.getLog(ResultSetPersister.class);
+
+    class ExecutionSource implements DBCExecutionSource {
+
+        private final DBSDataContainer dataContainer;
+
+        ExecutionSource(@NotNull DBSDataContainer dataContainer) {
+            this.dataContainer = dataContainer;
+        }
+
+        @Nullable
+        @Override
+        public DBSDataContainer getDataContainer() {
+            return dataContainer;
+        }
+
+        @NotNull
+        @Override
+        public Object getExecutionController() {
+            return viewer;
+        }
+
+        @Nullable
+        @Override
+        public Object getSourceDescriptor() {
+            return ResultSetPersister.this;
+        }
+
+        @Nullable
+        @Override
+        public DBCScriptContext getScriptContext() {
+            return null;
+        }
+    }
+
+    private final class ResultSetUpdaterJob extends DataUpdaterJob {
+        private ResultSetUpdaterJob(
+            boolean generateScript,
+            @NotNull ResultSetSaveSettings settings,
+            @Nullable DBDDataUpdateListener listener,
+            @NotNull DBCExecutionContext executionContext
+        ) {
+            super(ResultSetPersister.this, generateScript, settings, listener, executionContext);
+        }
+
+        @Nullable
+        @Override
+        protected Throwable executeUpdate(
+            @NotNull DBRProgressMonitor monitor,
+            @NotNull Map<String, Object> options
+        ) {
+            hasZeroRowChanges = false;
+            model.setUpdateInProgress(this);
+            UIUtils.asyncExec(viewer::fireResultSetChange);
+            try {
+                return super.executeUpdate(monitor, options);
+            } finally {
+                model.setUpdateInProgress(null);
+            }
+        }
+
+        @Override
+        protected void handleCompletion(@Nullable Throwable error) {
+            if (isGenerateScript()) {
+                if (error != null) {
+                    showError(error);
+                }
+            } else {
+                processReflectChanges(error);
+            }
+            super.handleCompletion(error);
+        }
+    }
+
+    @NotNull
+    private final ResultSetViewer viewer;
+    @NotNull
+    private final DBDAttributeBinding[] columns;
+    private boolean hasZeroRowChanges;
+
+    ResultSetPersister(@NotNull ResultSetViewer viewer) {
+        super(viewer.getModel(), viewer.getExecutionContext());
+        this.autocommit = false;
+        this.viewer = viewer;
+        this.columns = viewer.getModel().getAttributes();
+        collectChanges();
+    }
+
+    @NotNull
+    @Override
+    protected DataUpdaterJob createDataUpdaterJob(
+        boolean generateScript,
+        @NotNull ResultSetSaveSettings settings,
+        @Nullable DBDDataUpdateListener listener,
+        @NotNull DBCExecutionContext executionContext
+    ) {
+        return new ResultSetUpdaterJob(generateScript, settings, listener, executionContext);
+    }
+
+    @NotNull
+    public Set<DBDAttributeBinding> getUpdatedAttributes() {
+        Set<DBDAttributeBinding> attrs = new LinkedHashSet<>();
+        for (ResultSetRow row : changedRows) {
+            attrs.addAll(row.getChangedAttributes());
+        }
+        return attrs;
+    }
+
+    @NotNull
+    public ResultSetSaveReport generateReport() {
+        ResultSetSaveReport report = new ResultSetSaveReport();
+        report.setDeletes(deletedRows.size());
+        report.setInserts(addedRows.size());
+        int changedRows = 0;
+        for (ResultSetRow row : this.rowIdentifiers.keySet()) {
+            if (row.isChanged()) {
+                changedRows++;
+            }
+        }
+        report.setUpdates(changedRows);
+
+        DBPDataSource dataSource = viewer.getDataSource();
+        report.setHasReferences(dataSource != null && dataSource.getInfo().supportsReferentialIntegrity());
+
+        return report;
+    }
+
+    boolean refreshInsertedRows() throws DBCException {
+        if (!viewer.getModel().isSingleSource()) {
+            return false;
+        }
+        List<ResultSetRow> refreshRows = new ArrayList<>();
+        refreshRows.addAll(addedRows);
+        refreshRows.addAll(changedRows);
+        if (refreshRows.isEmpty()) {
+            // Nothing to refresh
+            return false;
+        }
+        final DBDRowIdentifier rowIdentifier = model.getDefaultRowIdentifier();
+        if (rowIdentifier == null || rowIdentifier.isIncomplete()) {
+            // No key - can't refresh
+            return false;
+        }
+
+        DBSEntity entity = rowIdentifier.getEntity();
+        if (entity.getDataSource() != null &&
+            (entity instanceof DBSDocumentContainer || entity.getDataSource().getInfo().isDynamicMetadata())
+        ) {
+            // FIXME: do not refresh documents for now. Can be solved by extracting document ID attributes
+            // FIXME: but it will require to provide dynamic document metadata.
+            return false;
+        }
+
+        DBCExecutionContext executionContext = viewer.getContainer().getExecutionContext();
+        if (executionContext == null) {
+            throw new DBCException("No execution context");
+        }
+        DBSDataContainer dataContainer = viewer.getDataContainer();
+        if (dataContainer == null) {
+            throw new DBCException("No data container");
+        }
+
+        viewer.queueDataPump(new RowRefreshJob(
+            executionContext,
+            new ResultSetExecutionSource(dataContainer, viewer, this),
+            rowIdentifier,
+            refreshRows
+        ));
+
+        return true;
+    }
+
+    @Override
+    protected void collectUpdatedRows() {
+        deletedRows.clear();
+        addedRows.clear();
+        changedRows.clear();
+        for (ResultSetRow row : model.getAllRows()) {
+            switch (row.getState()) {
+                case ResultSetRow.STATE_NORMAL:
+                    if (row.isChanged()) {
+                        changedRows.add(row);
+                    }
+                    break;
+                case ResultSetRow.STATE_ADDED:
+                    addedRows.add(row);
+                    break;
+                case ResultSetRow.STATE_REMOVED:
+                    deletedRows.add(row);
+                    break;
+            }
+        }
+    }
+
+
+    @NotNull
+    @Override
+    protected List<DataStatementInfo> prepareDeleteCascade(
+        @NotNull DBRProgressMonitor monitor,
+        @NotNull DBDRowIdentifier rowIdentifier,
+        @NotNull List<DataStatementInfo> statements,
+        boolean deepCascade
+    ) throws DBException {
+        List<DataStatementInfo> result = new ArrayList<>();
+
+        DBSEntity entity = rowIdentifier.getEntity();
+        Collection<? extends DBSEntityAssociation> references = entity.getReferences(monitor);
+        if (references != null) {
+            // Now iterate over all statements and make cascade delete for each
+            for (DataStatementInfo stat : statements) {
+
+                List<DataStatementInfo> cascadeStats = new ArrayList<>();
+
+                for (DBSEntityAssociation ref : references) {
+                    if (ref instanceof DBSTableForeignKey fk && fk.getDeleteRule() == DBSForeignKeyModifyRule.CASCADE) {
+                        // It is already delete cascade - just ignore it
+                        continue;
+                    }
+                    DBSEntity refEntity = ref.getParentObject();
+                    if (ref instanceof DBSEntityReferrer er) {
+                        List<? extends DBSEntityAttributeRef> attrRefs = er.getAttributeReferences(monitor);
+                        if (attrRefs != null) {
+
+                            List<DBDAttributeValue> refKeyValues = new ArrayList<>();
+
+                            for (DBSEntityAttributeRef attrRef : attrRefs) {
+                                DBSEntityAttribute attribute = attrRef.getAttribute();
+                                if (attribute != null) {
+                                    DBDAttributeValue value = DBDAttributeValue.getAttributeValue(stat.getKeyAttributes(), attribute);
+                                    if (value == null) {
+                                        log.debug("Can't find attribute value for '" + attribute.getName() + "' recursive delete");
+                                    } else {
+                                        refKeyValues.add(value);
+                                    }
+                                }
+                            }
+
+                            if (!refKeyValues.isEmpty()) {
+                                // We have a key. Let's delete
+                                DataStatementInfo cascadeStat = new DataStatementInfo(DBSManipulationType.DELETE, stat.row, refEntity);
+                                cascadeStat.getKeyAttributes().addAll(refKeyValues);
+                                cascadeStats.add(cascadeStat);
+                            }
+                        }
+                    }
+                }
+                result.addAll(cascadeStats);
+                result.add(stat);
+            }
+        }
+        return result;
+    }
+
+    @NotNull
+    @Override
+    protected DataStatementInfo getDataStatementInfo(
+        @NotNull DBSManipulationType type,
+        @NotNull ResultSetRow row,
+        @NotNull DBSEntity entity
+    ) {
+        return new DataStatementInfo(type, row, entity);
+    }
+
+    /**
+     * Filter changes
+     * Depending on attributes structure we leave only leaf elements or entire document (for document-oriented databases)
+     *
+     * @param row row to check
+     * @return map of changed attributes and their new values null if no changes
+     */
+    @Nullable
+    protected Map<DBDAttributeBinding, Object> collectUpdateChanges(@NotNull ResultSetRow row) {
+        if (!row.isChanged()) {
+            return null;
+        }
+        Map<DBDAttributeBinding, Object> changes = new LinkedHashMap<>(row.getChangesCount());
+        List<DBDAttributeBinding> attrRefs = new ArrayList<>();
+        boolean hasComplexUpdates = false;
+        for (Map.Entry<DBDAttributeBinding, Object> change : row.getChanges()) {
+            if (change.getValue() instanceof DBDAttributeBinding ab) {
+                attrRefs.add(ab);
+            }
+            if (!hasComplexUpdates && isComplexNestedAttribute(change.getKey())) {
+                hasComplexUpdates = true;
+            }
+        }
+        if (hasComplexUpdates && !attrRefs.isEmpty()) {
+            // If we have complex values then leave only nested elements attributes
+            for (Map.Entry<DBDAttributeBinding, Object> change : row.getChanges()) {
+                if (change.getValue() instanceof DBDAttributeBinding ab && attrRefs.contains(ab)) {
+                    changes.put(ab, row.getChange(ab));
+                }
+            }
+        } else {
+            // Otherwise remove root element from the list
+            for (Map.Entry<DBDAttributeBinding, Object> change : row.getChanges()) {
+                if (attrRefs.contains(change.getKey())) {
+                    continue;
+                }
+                if (change.getValue() instanceof DBDAttributeBinding ab) {
+                    changes.put(change.getKey(), row.getChange(ab));
+                } else {
+                    changes.put(change.getKey(), change.getValue());
+                }
+            }
+        }
+        return changes;
+    }
+
+    // Returns true only if our attribute has parent of type array
+    private static boolean isComplexNestedAttribute(@NotNull DBDAttributeBinding attr) {
+        for (DBDAttributeBinding parent = attr.getParentObject(); parent != null; parent = parent.getParentObject()) {
+            if (parent.getDataKind() == DBPDataKind.ARRAY) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public void rejectChanges() {
+        collectChanges();
+        for (ResultSetRow row : changedRows) {
+            if (row.isChanged()) {
+                for (Map.Entry<DBDAttributeBinding, Object> changedValue : row.getChanges()) {
+                    if (changedValue.getValue() instanceof DBDAttributeBinding) {
+                        continue;
+                    }
+                    Object curValue = model.getCellValue(changedValue.getKey(), row);
+                    // If new value and old value are the same - do not release it
+                    if (!Objects.equals(changedValue.getValue(), curValue)) {
+                        DBUtils.releaseValue(curValue);
+                        try {
+                            model.updateCellValue(changedValue.getKey(), row, null, changedValue.getValue(), false);
+                        } catch (DBException e) {
+                            log.error(e);
+                        }
+                    }
+                }
+                row.clearChanges();
+            }
+        }
+
+        boolean rowsChanged = model.cleanupRows(addedRows);
+        // Remove deleted rows
+        for (ResultSetRow row : deletedRows) {
+            row.setState(ResultSetRow.STATE_NORMAL);
+        }
+        model.refreshChangeCount();
+
+        try {
+            UIUtils.runInProgressService(monitor ->
+                model.refreshHintsInfo(monitor, model.getAllRows(), true));
+        } catch (Exception e) {
+            log.debug("Error refreshing hints", e);
+        }
+
+        viewer.redrawData(false, rowsChanged);
+        viewer.updateEditControls();
+        viewer.updatePanelsContent(false);
+        viewer.getActivePresentation().updateValueView();
+    }
+
+    // Reflect data changes in viewer
+    // Changes affects only rows which statements executed successfully
+    private boolean reflectChanges() {
+        // Auto-commit may advance the baseline even when a later statement fails.
+        if (updateStatements.stream().anyMatch(DBDDataStatementInfo::isExecuted)
+            || insertStatements.stream().anyMatch(DBDDataStatementInfo::isExecuted)
+            || deleteStatements.stream().anyMatch(DBDDataStatementInfo::isExecuted)
+        ) {
+            viewer.clearCellEditHistory();
+        }
+        boolean rowsChanged = false;
+        for (ResultSetRow row : changedRows) {
+            for (DataStatementInfo stat : updateStatements) {
+                if (stat.isExecuted() && stat.row == row) {
+                    reflectKeysUpdate(stat);
+                    row.clearChanges();
+                    break;
+                }
+            }
+        }
+        for (ResultSetRow row : addedRows) {
+            for (DataStatementInfo stat : insertStatements) {
+                if (stat.isExecuted() && stat.row == row) {
+                    reflectKeysUpdate(stat);
+                    row.setState(ResultSetRow.STATE_NORMAL);
+                    break;
+                }
+            }
+        }
+        for (ResultSetRow row : deletedRows) {
+            for (DataStatementInfo stat : deleteStatements) {
+                if (stat.isExecuted() && stat.row == row) {
+                    model.cleanupRow(row);
+                    rowsChanged = true;
+                    break;
+                }
+            }
+        }
+
+        model.refreshChangeCount();
+        return rowsChanged;
+    }
+
+    private void reflectKeysUpdate(@NotNull DataStatementInfo stat) {
+        // Update keys
+        if (!stat.updatedCells.isEmpty()) {
+            for (Map.Entry<Integer, Object> entry : stat.updatedCells.entrySet()) {
+                ResultSetRow row = stat.row;
+                DBUtils.releaseValue(row.values[entry.getKey()]);
+                row.values[entry.getKey()] = entry.getValue();
+            }
+        }
+    }
+
+    @NotNull
+    private DBSDataManipulator getDataManipulator(@NotNull DBSEntity entity) throws DBCException {
+        if (entity instanceof DBSDataManipulator dm) {
+            return dm;
+        } else {
+            throw new DBCException("Entity " + entity.getName() + " doesn't support data manipulation");
+        }
+    }
+
+    @Override
+    protected void notifyContainer(@NotNull DBCStatistics statistics) {
+        hasZeroRowChanges |= statistics.getRowsUpdated() == 0;
+        if (viewer.getContainer() instanceof IResultSetContainerExt rsc) {
+            rsc.handleExecuteResult(statistics);
+        }
+    }
+
+    @NotNull
+    @Override
+    protected DBCExecutionSource createExecutionSource(@NotNull DBSDataManipulator dataContainer) {
+        return new ExecutionSource(dataContainer);
+    }
+
+    @Nullable
+    @Override
+    protected DBDDataReceiver getKeyReceiver(@NotNull DBDDataStatementInfo statement) {
+        if (statement instanceof DataStatementInfo dataStatement) {
+            return new KeyDataReceiver(dataStatement);
+        }
+        return null;
+    }
+
+    void checkEntityIdentifiers() throws DBException {
+        DBCExecutionContext executionContext = viewer.getExecutionContext();
+        if (executionContext == null) {
+            throw new DBCException("Can't persist data - not connected to database");
+        }
+
+        boolean needsSingleEntity = this.hasInserts() || this.hasDeletes();
+
+        DBSEntity entity = model.getSingleSource();
+        if (needsSingleEntity) {
+            if (entity == null) {
+                throw new DBCException("Can't detect source entity");
+            }
+        }
+
+        if (entity != null) {
+            // Check for value locators
+            // Probably we have only virtual one with empty attribute set
+            DBDRowIdentifier identifier = viewer.getVirtualEntityIdentifier();
+            if (identifier != null) {
+                if (identifier.isIncomplete()) {
+                    // Empty identifier. We have to define it
+                    if (!UITask.run(() -> ValidateUniqueKeyUsageDialog.validateUniqueKey(viewer, executionContext))) {
+                        throw new DBCException("No unique key defined");
+                    }
+                }
+            }
+        }
+
+        Set<DBDAttributeBinding> updatedAttributes = this.getUpdatedAttributes();
+        if (this.hasDeletes()) {
+            DBDRowIdentifier defIdentifier = model.getDefaultRowIdentifier();
+            if (defIdentifier == null) {
+                throw new DBCException("No unique row identifier is result set. Cannot proceed with row(s) delete.");
+            } else if (!defIdentifier.isValidIdentifier()) {
+                throw new DBCException("Attributes of unique key '" +
+                    DBUtils.getObjectFullName(defIdentifier.getUniqueKey(), DBPEvaluationContext.UI) +
+                    "' are missing in result set. Cannot proceed with row(s) delete.");
+            }
+        }
+
+        {
+            for (DBDAttributeBinding attr : updatedAttributes) {
+                // Check attributes of non-virtual identifier
+                DBDRowIdentifier rowIdentifier = attr.getRowIdentifier();
+                if (rowIdentifier == null) {
+                    if (viewer.getModel().isDynamicMetadata() && attr.getDataKind() == DBPDataKind.DOCUMENT) {
+                        // Document contains ID inside - no need to check
+                        continue;
+                    }
+                    // We shouldn't be here ever!
+                    // Virtual id should be created if we missing natural one
+                    throw new DBCException("Attribute " + attr.getName() + " was changed but it hasn't associated unique key");
+                } else if (!rowIdentifier.isValidIdentifier()) {
+                    throw new DBCException(
+                        "Can't update attribute '" + attr.getName() +
+                            "' - attributes of key '" +
+                            DBUtils.getObjectFullName(rowIdentifier.getUniqueKey(), DBPEvaluationContext.UI) +
+                            "' are missing in result set");
+                }
+            }
+        }
+    }
+
+    private void processReflectChanges(@Nullable Throwable error) {
+        // Reflect changes
+        UIUtils.syncExec(() -> {
+            boolean rowsChanged = false;
+            if (isAutoCommitEnabled() || error == null) {
+                rowsChanged = reflectChanges();
+            }
+            if (!viewer.getControl().isDisposed()) {
+                //releaseStatements();
+                viewer.redrawData(false, rowsChanged);
+                viewer.updateEditControls();
+                if (error == null && hasZeroRowChanges) {
+                    viewer.setStatus(ResultSetMessages.controls_resultset_viewer_status_save_zero_rows, DBPMessageType.WARNING);
+                } else if (error == null) {
+                    viewer.setStatus(
+                        NLS.bind(
+                            ResultSetMessages.controls_resultset_viewer_status_inserted_,
+                            ResultSetUtils.formatRowCount(getInsertStats().getRowsUpdated()),
+                            ResultSetUtils.formatRowCount(getDeleteStats().getRowsUpdated()),
+                            ResultSetUtils.formatRowCount(getUpdateStats().getRowsUpdated())
+                        ));
+                } else {
+                    DBWorkbench.getPlatformUI().showError(
+                        "Data error", "Error synchronizing data with database", error);
+                    viewer.setStatus(GeneralUtils.getFirstMessage(error), DBPMessageType.ERROR);
+                }
+                if (hasZeroRowChanges && error == null && !viewer.getControl().isDisposed()) {
+                    // Execution succeeded and may have caused side effects even when no rows were affected.
+                    ConfirmationDialog.confirmAction(
+                        viewer.getControl().getShell(),
+                        ResultSetPreferences.CONFIRM_RS_SAVE_ZERO_ROWS,
+                        ConfirmationDialog.WARNING
+                    );
+                }
+            }
+            viewer.fireResultSetChange();
+        });
+    }
+
+    private void showError(@NotNull Throwable error) {
+        DBWorkbench.getPlatformUI().showError("Data error", "Error generating script", error);
+    }
+
+    @Nullable
+    @Override
+    public DBCSmartTransactionManager getSmartTransactionManager() {
+        return viewer.getContainer() instanceof DBCSmartTransactionManager transactionManager ? transactionManager : null;
+    }
+
+    /**
+     * Key data receiver
+     */
+    class KeyDataReceiver implements DBDDataReceiver {
+        DataStatementInfo statement;
+
+        KeyDataReceiver(@NotNull DataStatementInfo statement) {
+            this.statement = statement;
+        }
+
+        @Override
+        public void fetchStart(@NotNull DBCSession session, @NotNull DBCResultSet resultSet, long offset, long maxRows) {
+
+        }
+
+        @Override
+        public void fetchRow(@NotNull DBCSession session, @NotNull DBCResultSet resultSet) throws DBCException {
+            DBCResultSetMetaData rsMeta = resultSet.getMeta();
+            List<? extends DBCAttributeMetaData> keyAttributes = rsMeta.getAttributes();
+            for (int i = 0; i < keyAttributes.size(); i++) {
+                DBCAttributeMetaData keyAttribute = keyAttributes.get(i);
+                DBDValueHandler valueHandler = DBUtils.findValueHandler(session, keyAttribute);
+                Object keyValue = valueHandler.fetchValueObject(session, resultSet, keyAttribute, i);
+                if (keyValue == null) {
+                    // [MSSQL] Sometimes driver returns empty list of generated keys if
+                    // table has auto-increment columns and user performs simple row update
+                    // Just ignore such empty keys. We can't do anything with them anyway
+                    continue;
+                }
+                boolean updated = false;
+                if (!CommonUtils.isEmpty(keyAttribute.getName())) {
+                    DBDAttributeBinding binding = model.getAttributeBinding(statement.getEntity(), keyAttribute.getName());
+                    if (binding != null) {
+                        // Got it. Just update column oldValue
+                        statement.updatedCells.put(binding.getOrdinalPosition(), keyValue);
+                        //curRows.get(statement.row.row)[colIndex] = keyValue;
+                        updated = true;
+                    }
+                }
+                if (!updated) {
+                    // Key not found
+                    // Try to find and update auto-increment column
+                    for (int k = 0; k < columns.length; k++) {
+                        DBDAttributeBinding column = columns[k];
+                        if (column.isAutoGenerated()) {
+                            // Got it
+                            statement.updatedCells.put(k, keyValue);
+                            //curRows.get(statement.row.row)[k] = keyValue;
+                            updated = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!updated) {
+                    // Auto-generated key not found
+                    // Just skip it..
+                    log.debug("Can't find target column for auto-generated key '" + keyAttribute.getName() + "'");
+                }
+            }
+        }
+
+        @Override
+        public void fetchEnd(@NotNull DBCSession session, @NotNull DBCResultSet resultSet) {
+
+        }
+
+        @Override
+        public void close() {
+        }
+    }
+
+    /**
+     * Data statement
+     */
+    static class DataStatementInfo extends DBDDataStatementInfo {
+        @NotNull
+        final DBSManipulationType type;
+        @NotNull
+        final ResultSetRow row;
+        final Map<Integer, Object> updatedCells = new HashMap<>();
+
+        DataStatementInfo(@NotNull DBSManipulationType type, @NotNull ResultSetRow row, @NotNull DBSEntity entity) {
+            super(entity);
+            this.type = type;
+            this.row = row;
+        }
+    }
+
+    private class RowRefreshJob extends ResultSetJobAbstract {
+
+        private final DBDRowIdentifier rowIdentifier;
+        private final List<ResultSetRow> rows;
+
+        RowRefreshJob(
+            @NotNull DBCExecutionContext executionContext,
+            @NotNull ResultSetExecutionSource executionSource,
+            @NotNull DBDRowIdentifier rowIdentifier,
+            @NotNull List<ResultSetRow> rows
+        ) {
+            super("Refresh rows", executionSource, executionContext);
+            this.rowIdentifier = rowIdentifier;
+            this.rows = new ArrayList<>(rows);
+        }
+
+        @NotNull
+        @Override
+        protected IStatus run(@NotNull DBRProgressMonitor monitor) {
+            if (!viewer.acquireDataReadLock()) {
+                return Status.CANCEL_STATUS;
+            }
+            monitor.beginTask("Refresh updated rows", 1);
+            try {
+                DBSDataContainer dataContainer = executionSource.getDataContainer();
+                Object[][] refreshValues = new Object[rows.size()][];
+
+                DBDAttributeBinding[] curAttributes = viewer.getModel().getAttributes();
+                AbstractExecutionSource executionSource = new AbstractExecutionSource(
+                    dataContainer, getExecutionContext(), this);
+                List<DBDAttributeBinding> idAttributes = rowIdentifier.getAttributes();
+                if (idAttributes.isEmpty()) {
+                    return Status.OK_STATUS;
+                }
+                try (DBCSession session = getExecutionContext().openSession(
+                    monitor,
+                    DBCExecutionPurpose.UTIL,
+                    "Refresh row(s) after insert/update"
+                )) {
+                    for (int i = 0; i < rows.size(); i++) {
+                        ResultSetRow row = rows.get(i);
+                        List<DBDAttributeConstraint> constraints = new ArrayList<>();
+                        boolean hasKey = true;
+                        for (DBDAttributeBinding keyAttr : idAttributes) {
+                            Object keyValue = viewer.getModel().getCellValue(keyAttr, row);
+                            if (DBUtils.isNullValue(keyValue)) {
+                                hasKey = false;
+                                break;
+                            }
+                            DBDAttributeConstraint constraint = new DBDAttributeConstraint(keyAttr);
+                            constraint.setOperator(DBCLogicalOperator.EQUALS);
+                            constraint.setValue(keyValue);
+                            constraints.add(constraint);
+                        }
+                        if (!hasKey) {
+                            // No key value for this row
+                            continue;
+                        }
+                        DBDDataFilter filter = new DBDDataFilter(constraints);
+
+                        RowDataReceiver dataReceiver = new RowDataReceiver(curAttributes);
+                        dataContainer.readData(
+                            executionSource,
+                            session,
+                            dataReceiver,
+                            filter,
+                            0,
+                            0,
+                            DBSDataContainer.FLAG_REFRESH,
+                            0);
+                        refreshValues[i] = dataReceiver.getRowValues();
+                    }
+                }
+
+                // Ok, now we have refreshed values. Let's update real model
+                UIUtils.syncExec(() -> {
+                    // Update only if metadata wasn't changed
+                    if (!viewer.getControl().isDisposed() && viewer.getModel().getAttributes() == curAttributes) {
+                        for (int i = 0; i < rows.size(); i++) {
+                            if (refreshValues[i] != null) {
+                                rows.get(i).values = refreshValues[i];
+                            }
+                        }
+                        viewer.redrawData(false, true);
+                    }
+                });
+            } catch (Throwable ex) {
+                log.warn("Error refreshing rows", ex);
+                // Error happened during data refresh
+                // Let's rollback if we are in transaction
+                if (viewer.getPreferenceStore().getBoolean(ModelPreferences.QUERY_ROLLBACK_ON_ERROR)) {
+                    DBCTransactionManager txnManager = DBUtils.getTransactionManager(getExecutionContext());
+                    try {
+                        if (txnManager != null && !txnManager.isAutoCommit()) {
+                            try (DBCSession session = getExecutionContext().openSession(
+                                monitor,
+                                DBCExecutionPurpose.UTIL,
+                                "Rollback after data refresh failure"
+                            )) {
+                                txnManager.rollback(session, null);
+                            }
+                        }
+                    } catch (DBCException e) {
+                        log.warn("Error rolling back after data refresh failure", ex);
+                    }
+                }
+            } finally {
+                monitor.done();
+                viewer.releaseDataReadLock();
+            }
+            return Status.OK_STATUS;
+        }
+    }
+}

@@ -1,0 +1,306 @@
+/*
+ * DBeaver - Universal Database Manager
+ * Copyright (C) 2010-2026 DBeaver Corp and others
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.jkiss.dbeaver.tools.transfer.stream.exporter;
+
+import org.jkiss.code.NotNull;
+import org.jkiss.code.Nullable;
+import org.jkiss.dbeaver.DBException;
+import org.jkiss.dbeaver.model.DBConstants;
+import org.jkiss.dbeaver.model.DBPDataKind;
+import org.jkiss.dbeaver.model.DBUtils;
+import org.jkiss.dbeaver.model.data.DBDAttributeBinding;
+import org.jkiss.dbeaver.model.data.DBDContent;
+import org.jkiss.dbeaver.model.data.DBDContentStorage;
+import org.jkiss.dbeaver.model.data.DBDDisplayFormat;
+import org.jkiss.dbeaver.model.exec.DBCResultSet;
+import org.jkiss.dbeaver.model.exec.DBCSession;
+import org.jkiss.dbeaver.model.runtime.DBRProgressMonitor;
+import org.jkiss.dbeaver.tools.transfer.DTUtils;
+import org.jkiss.dbeaver.tools.transfer.stream.IStreamDataExporterSite;
+import org.jkiss.dbeaver.utils.ContentUtils;
+import org.jkiss.dbeaver.utils.GeneralUtils;
+import org.jkiss.utils.CommonUtils;
+import org.jkiss.utils.IOUtils;
+
+import java.io.IOException;
+import java.io.Reader;
+import java.util.function.Consumer;
+
+/**
+ * Markdown Table Exporter
+ */
+public class DataExporterMarkdownTable extends StreamExporterAbstract {
+
+    private static final String PROP_NULL_STRING = "nullString";
+    private static final String PROP_FORMAT_NUMBERS = "formatNumbers";
+    private static final String PROP_SHOW_HEADER_SEPARATOR = "showHeaderSeparator";
+    private static final String PROP_CONFLUENCE_FORMAT = "confluenceFormat";
+    public static final String PROP_ESCAPE_CELL_CONTENT = "escapeCellContent";
+
+    private static final String PIPE_ESCAPE = "&#124;";
+    public static final String NEW_LINE_ESCAPE = "<br>";
+    public static final char CELL_VALUE_ESCAPE = '`';
+
+    private String rowDelimiter;
+    private String nullString;
+    private boolean showHeaderSeparator;
+    private boolean confluenceFormat;
+    private boolean isEscapeCellContent;
+
+    private final CellValueEscaper cellValueEscaper = new CellValueEscaper();
+
+    private DBDAttributeBinding[] columns;
+
+    private final StringBuilder buffer = new StringBuilder();
+
+    @Override
+    public void init(IStreamDataExporterSite site) throws DBException
+    {
+        super.init(site);
+
+        Object nullStringProp = site.getProperties().get(PROP_NULL_STRING);
+        nullString = nullStringProp == null ? null : nullStringProp.toString();
+        rowDelimiter = GeneralUtils.getDefaultLineSeparator();
+        showHeaderSeparator = CommonUtils.getBoolean(site.getProperties().get(PROP_SHOW_HEADER_SEPARATOR), true);
+        confluenceFormat = CommonUtils.getBoolean(site.getProperties().get(PROP_CONFLUENCE_FORMAT), false);
+        isEscapeCellContent = CommonUtils.getBoolean(site.getProperties().get(PROP_ESCAPE_CELL_CONTENT), false);
+    }
+
+    @Override
+    protected DBDDisplayFormat getValueExportFormat(DBDAttributeBinding column) {
+        if (column.getDataKind() == DBPDataKind.NUMERIC && !Boolean.TRUE.equals(getSite().getProperties().get(PROP_FORMAT_NUMBERS))) {
+            return DBDDisplayFormat.NATIVE;
+        }
+        return super.getValueExportFormat(column);
+    }
+
+    @Override
+    public void exportHeader(DBCSession session) throws DBException, IOException
+    {
+        columns = getSite().getAttributes();
+        // Print separator line
+        printHeader(false);
+        if (showHeaderSeparator && !confluenceFormat) {
+            printHeader(true);
+        }
+    }
+
+    private void printHeader(boolean separator)
+    {
+        if (confluenceFormat) writeDelimiter();
+        writeDelimiter();
+        for (int i = 0, columnsSize = columns.length; i < columnsSize; i++) {
+            DBDAttributeBinding column = columns[i];
+            String colName = column.getLabel();
+            if (CommonUtils.isEmpty(colName)) {
+                colName = column.getName();
+            }
+            if (!separator) {
+                writeCellValue(colName);
+            } else {
+                for (int k = 0; k < colName.length(); k++) {
+                    getWriter().write('-');
+                }
+            }
+            writeDelimiter();
+            if (confluenceFormat) writeDelimiter();
+        }
+        writeRowLimit();
+    }
+
+    @Override
+    public void exportRow(DBCSession session, DBCResultSet resultSet, Object[] row) throws DBException, IOException
+    {
+        writeDelimiter();
+        for (int i = 0; i < row.length && i < columns.length; i++) {
+            DBDAttributeBinding column = columns[i];
+            if (DBUtils.isNullValue(row[i])) {
+                if (!CommonUtils.isEmpty(nullString)) {
+                    getWriter().write(nullString);
+                }
+            } else if (row[i] instanceof DBDContent) {
+                // Content
+                // Inline textual content and handle binaries in some special way
+                DBDContent content = (DBDContent)row[i];
+                try {
+                    DBDContentStorage cs = content.getContents(session.getProgressMonitor());
+                    if (cs == null) {
+                        writeCellValue(DBConstants.NULL_VALUE_LABEL);
+                    } else if (ContentUtils.isTextContent(content)) {
+                        if (isEscapeCellContent) {
+                            try (Reader reader = cs.getContentReader()) {
+                                cellValueEscaper.writeCellValue(IOUtils.readToString(reader));
+                            }
+                        } else {
+                            writeCellValue(cs.getContentReader());
+                        }
+                    } else {
+                        getSite().writeBinaryData(cs);
+                    }
+                }
+                finally {
+                    DTUtils.closeContents(resultSet, content);
+                }
+            } else {
+                Consumer<String> cellWriter = isEscapeCellContent ? cellValueEscaper::writeCellValue : this::writeCellValue;
+                cellWriter.accept(super.getValueDisplayString(column, row[i]));
+            }
+            writeDelimiter();
+        }
+        writeRowLimit();
+    }
+
+    @Override
+    public void exportFooter(DBRProgressMonitor monitor) throws DBException, IOException
+    {
+    }
+
+    private void writeCellValue(@NotNull String value)
+    {
+        buffer.setLength(0);
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '\r') {
+                buffer.append(NEW_LINE_ESCAPE);
+                if (i + 1 < value.length() && value.charAt(i + 1) == '\n') {
+                    i++;
+                }
+            } else if (c == '\n') {
+                buffer.append(NEW_LINE_ESCAPE);
+            } else if (c == '|') {
+                buffer.append(PIPE_ESCAPE);
+            } else {
+                buffer.append(c);
+            }
+        }
+        getWriter().write(buffer.toString());
+    }
+
+    private void writeCellValue(Reader reader) throws IOException
+    {
+        try {
+            // Copy reader
+            char buffer[] = new char[2000];
+            boolean pendingCarriageReturn = false;
+            for (;;) {
+                int count = reader.read(buffer);
+                if (count <= 0) {
+                    break;
+                }
+                for (int i = 0; i < count; i++) {
+                    char c = buffer[i];
+                    if (pendingCarriageReturn) {
+                        getWriter().write(NEW_LINE_ESCAPE);
+                        pendingCarriageReturn = false;
+                        if (c == '\n') {
+                            continue;
+                        }
+                    }
+                    if (c == '\r') {
+                        pendingCarriageReturn = true;
+                    } else if (c == '\n') {
+                        getWriter().write(NEW_LINE_ESCAPE);
+                    } else if (c == '|') {
+                        getWriter().write(PIPE_ESCAPE);
+                    } else {
+                        getWriter().write(c);
+                    }
+                }
+            }
+            if (pendingCarriageReturn) {
+                getWriter().write(NEW_LINE_ESCAPE);
+            }
+        } finally {
+            ContentUtils.close(reader);
+        }
+    }
+
+    private void writeDelimiter()
+    {
+        getWriter().write('|');
+    }
+
+    private void writeRowLimit()
+    {
+        getWriter().write(rowDelimiter);
+    }
+
+    private class CellValueEscaper {
+        int indexEscapeStart;
+        int escapeSequenceLength = 1;
+        boolean cellEscaped = true;
+
+
+        public void writeCellValue(@NotNull String value) {
+            reset();
+            fillBuffer(value);
+            getWriter().write(buffer.toString());
+        }
+
+        private void fillBuffer(@NotNull String value) {
+            for (int i = 0; i < value.length(); i++) {
+                char c = value.charAt(i);
+                if (c == '\r') {
+                    if (i + 1 < value.length() && value.charAt(i + 1) == '\n') {
+                        i++;
+                    }
+                    terminateEscapeSequence(NEW_LINE_ESCAPE);
+                } else if (c == '\n') {
+                    terminateEscapeSequence(NEW_LINE_ESCAPE);
+                } else if (c == '|') {
+                    terminateEscapeSequence(PIPE_ESCAPE);
+                } else {
+                    if (c == CELL_VALUE_ESCAPE) {
+                        // we must escape any number (N)(`) in code blocks with N+1 (`) in the beginning and end of the code block. Ex: a`b ->``a`b`` ; a``b -> ```a``b```
+                        int localEscapeSequenceLength = 2;
+                        while (i + 1 < value.length() && value.charAt(i + 1) == CELL_VALUE_ESCAPE) {
+                            localEscapeSequenceLength++;
+                            i++;
+                            buffer.append(value.charAt(i));
+                        }
+                        escapeSequenceLength = Math.max(escapeSequenceLength, localEscapeSequenceLength);
+                    }
+                    buffer.append(c);
+                    cellEscaped = false;
+                }
+            }
+            terminateEscapeSequence(null);
+        }
+
+        private void terminateEscapeSequence(@Nullable String tokenTerminateSequence) {
+            String fullEscapeSequence = String.valueOf(CELL_VALUE_ESCAPE).repeat(escapeSequenceLength);
+            if (!cellEscaped) {
+                buffer.insert(indexEscapeStart, fullEscapeSequence);
+                buffer.append(fullEscapeSequence);
+            }
+            if (tokenTerminateSequence != null) {
+                buffer.append(tokenTerminateSequence);
+            }
+            indexEscapeStart = buffer.length();
+            escapeSequenceLength = 1;
+            cellEscaped = true;
+        }
+
+        public void reset() {
+            buffer.setLength(0);
+            escapeSequenceLength = 1;
+            indexEscapeStart = 0;
+            cellEscaped = true;
+        }
+    }
+
+}

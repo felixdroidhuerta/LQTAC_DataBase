@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?eclipse version="3.2"?>
+
+<plugin>
+
+    <extension point="org.jkiss.dbeaver.dataSourceConfigurator">
+        <configurator dataSource="vertica" class="org.jkiss.dbeaver.ext.vertica.ui.views.VerticaConnectionPage"/>
+    </extension>
+
+    <extension point="org.jkiss.dbeaver.databaseEditor">
+        <configurator class="org.jkiss.dbeaver.ext.vertica.ui.config.VerticaSequenceConfigurator">
+            <objectType name="org.jkiss.dbeaver.ext.vertica.model.VerticaSequence"/>
+        </configurator>
+    </extension>
+
+</plugin>

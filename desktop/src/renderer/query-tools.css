@@ -1,0 +1,22 @@
+.heading-tools { display:flex;align-items:center;gap:12px;min-width:0; }
+.workspace-actions { display:flex;align-items:center;gap:12px;margin-left:auto; }
+#query-database{display:block;max-width:260px;margin-top:6px;padding:4px 7px;font:11px 'Segoe UI',sans-serif;border:1px solid var(--border);border-radius:4px;background:#fff;color:#34536e;}#query-database[hidden]{display:none;}html[data-theme=dark] #query-database{background:#152232;color:#d7e2ee;border-color:#40556b;}
+.mini-tools { display:inline-flex;align-items:center;border:1px solid #d6e2ed;border-radius:5px;background:#f8fbff;flex-shrink:0; }
+.mini-tools>.mini-tool, .mini-tools>select { border-right:1px solid #d6e2ed; }
+.mini-tools>:last-child { border-right:0; }
+.mini-tool { min-height:26px;display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:3px 9px;font:11px/1.4 'Segoe UI',sans-serif;color:#345c80; }
+button.mini-tool:hover,button.mini-tool:focus-visible { background:#dfedfb; }
+.mini-tools select { font:10px 'Segoe UI',sans-serif;background:transparent;color:inherit;border:0;padding:3px;max-width:110px; }
+.editor-caption,.results-header { gap:10px;flex-wrap:wrap; }
+.tool-tip { position:fixed;max-width:310px;padding:10px 13px;border-radius:6px;border:1px solid #bdd4e9;background:#fff;color:#24435f;box-shadow:0 6px 22px #16334e26;font:12px/1.6 'Segoe UI',sans-serif;z-index:100;pointer-events:none; }
+#relations-dialog { width:calc(100vw - 70px);max-width:1300px;height:80vh;max-height:900px; }
+#relations-dialog .relations-controls { display:flex;gap:12px;align-items:center;justify-content:space-between;margin:10px 0; }
+#relations-dialog h2 { margin:0; }
+.relations-controls input { max-width:260px;padding:8px; }
+.relations-scroll { height:calc(100% - 130px);min-height:150px;overflow:auto;background:#f3f7fb;border:1px solid #d5e1ed; }
+.relations-canvas { position:relative;transform-origin:0 0; }
+.relations-canvas svg { position:absolute;inset:0;overflow:visible;pointer-events:none; }
+.relation-card { position:absolute;width:240px;min-height:100px;padding:12px;border:1px solid #86b6d9;border-radius:6px;background:white;color:#2e4965;box-shadow:0 2px 6px #193b5b15;font-size:12px; }
+.relation-card strong,.relation-card small { display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }.relation-card small { color:#738ba1;margin-top:5px; }
+.relation-card p { font:10px/1.5 Consolas,monospace;max-height:42px;overflow:auto;margin:8px 0 0; }
+#relations-message { margin:6px 0;font-size:12px; }

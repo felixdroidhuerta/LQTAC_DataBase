@@ -1,0 +1,187 @@
+/*
+ * DBeaver - Universal Database Manager
+ * Copyright (C) 2010-2026 DBeaver Corp and others
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.jkiss.dbeaver.model.net.ssh;
+
+import com.jcraft.jsch.Identity;
+import net.schmizz.sshj.SSHClient;
+import net.schmizz.sshj.common.LoggerFactory;
+import net.schmizz.sshj.transport.verification.OpenSSHKnownHosts;
+import net.schmizz.sshj.transport.verification.PromiscuousVerifier;
+import net.schmizz.sshj.userauth.method.AuthMethod;
+import net.schmizz.sshj.userauth.password.PasswordFinder;
+import net.schmizz.sshj.userauth.password.PasswordUtils;
+import org.jkiss.code.NotNull;
+import org.jkiss.code.Nullable;
+import org.jkiss.dbeaver.DBException;
+import org.jkiss.dbeaver.model.net.DBWHandlerConfiguration;
+import org.jkiss.dbeaver.model.net.ssh.config.SSHAuthConfiguration;
+import org.jkiss.dbeaver.model.net.ssh.config.SSHHostConfiguration;
+import org.jkiss.dbeaver.model.runtime.DBRProgressMonitor;
+import org.jkiss.dbeaver.runtime.DBWorkbench;
+import org.jkiss.utils.CommonUtils;
+import org.slf4j.Logger;
+import org.slf4j.helpers.NOPLogger;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+
+public class SSHJSessionController extends AbstractSessionController<SSHJSession> {
+    private static final List<String> DEFAULT_KNOWN_HOSTS_FILE_NAMES = List.of("known_hosts", "known_hosts2");
+
+    @NotNull
+    @Override
+    protected SSHJSession createSession() {
+        return new SSHJSession(this);
+    }
+
+    @NotNull
+    protected SSHClient createNewSession(
+        @NotNull DBRProgressMonitor monitor,
+        @NotNull DBWHandlerConfiguration configuration,
+        @NotNull SSHHostConfiguration host
+    ) throws DBException {
+        final int connectTimeout = configuration.getIntProperty(
+            SSHConstants.PROP_CONNECT_TIMEOUT,
+            SSHConstants.DEFAULT_CONNECT_TIMEOUT);
+        final int keepAliveInterval = configuration.getIntProperty(SSHConstants.PROP_ALIVE_INTERVAL) / 1000; // sshj uses seconds for keep-alive interval
+
+        final SSHAuthConfiguration auth = host.auth();
+        final SSHClient client = new SSHClient();
+
+        client.setConnectTimeout(connectTimeout);
+        client.getConnection().getKeepAlive().setKeepAliveInterval(keepAliveInterval);
+        client.getTransport().getConfig().setLoggerFactory(new FilterLoggerFactory());
+
+        setupHostKeyVerification(client, configuration, host, DBWorkbench.getPlatform().getApplication().isHeadlessMode());
+
+        monitor.subTask(String.format("Instantiate tunnel to %s:%d", host.hostname(), host.port()));
+
+        try {
+            client.connect(host.hostname(), host.port());
+        } catch (Exception e) {
+            throw new DBException("Error establishing SSHJ tunnel", e);
+        }
+
+        if (auth instanceof SSHAuthConfiguration.Password password && password.password() != null) {
+            try {
+                client.authPassword(host.username(), password.password());
+            } catch (Throwable e) {
+                throw new DBException("SSH password authentication failed", e);
+            }
+        } else if (auth instanceof SSHAuthConfiguration.KeyFile key) {
+            if (CommonUtils.isEmpty(key.password())) {
+                try {
+                    client.authPublickey(host.username(), key.path());
+                } catch (Throwable e) {
+                    throw new DBException("SSH public key authentication failed", e);
+                }
+            } else {
+                try {
+                    client.authPublickey(host.username(), client.loadKeys(key.path(), key.password().toCharArray()));
+                } catch (Throwable e) {
+                    throw new DBException("SSH public key (encrypted) authentication failed", e);
+                }
+            }
+        } else if (auth instanceof SSHAuthConfiguration.KeyData key) {
+            final PasswordFinder finder = CommonUtils.isEmpty(key.password())
+                ? null
+                : PasswordUtils.createOneOff(key.password().toCharArray());
+            try {
+                client.authPublickey(host.username(), client.loadKeys(key.data(), null, finder));
+            } catch (Throwable e) {
+                throw new DBException("SSH public key authentication failed", e);
+            }
+        } else if (auth instanceof SSHAuthConfiguration.Agent(String authSockPath)) {
+            final List<AuthMethod> methods = new ArrayList<>();
+            try {
+                for (Object identity : createAgentIdentityRepository(authSockPath).getIdentities()) {
+                    methods.add(new DBeaverAuthAgent((Identity) identity));
+                }
+                client.auth(host.username(), methods);
+            } catch (Throwable e) {
+                throw new DBException("SSH agent authentication failed", e);
+            }
+        }
+
+        return client;
+    }
+
+    static void setupHostKeyVerification(
+        @NotNull SSHClient client,
+        @NotNull DBWHandlerConfiguration configuration,
+        @NotNull SSHHostConfiguration actualHostConfiguration,
+        boolean headless
+    ) throws DBException {
+        if (headless || configuration.getBooleanProperty(SSHConstants.PROP_BYPASS_HOST_VERIFICATION)) {
+            client.addHostKeyVerifier(new PromiscuousVerifier());
+            client.getTransport().getConfig().setVerifyHostKeyCertificates(false);
+        } else {
+            loadKnownHosts(client, SSHUtils.getKnownSshHostsFileOrDefault(), actualHostConfiguration);
+            loadDefaultKnownHosts(client, OpenSSHKnownHosts.detectSSHDir());
+        }
+    }
+
+    static void loadDefaultKnownHosts(@NotNull SSHClient client, @Nullable File sshDirectory) throws DBException {
+        if (sshDirectory != null) {
+            // Load separately to report the failing path instead of SSHJ's generic "Could not load known_hosts" error.
+            for (String fileName : DEFAULT_KNOWN_HOSTS_FILE_NAMES) {
+                loadKnownHosts(client, new File(sshDirectory, fileName), null);
+            }
+        }
+    }
+
+    static void loadKnownHosts(
+        @NotNull SSHClient client,
+        @NotNull File knownHostsFile,
+        @Nullable SSHHostConfiguration actualHostConfiguration
+    ) throws DBException {
+        try {
+            if (actualHostConfiguration != null) {
+                client.addHostKeyVerifier(new KnownHostsVerifier(knownHostsFile, actualHostConfiguration));
+            } else {
+                client.loadKnownHosts(knownHostsFile);
+            }
+        } catch (IOException | RuntimeException e) {
+            throw new DBException(
+                "Could not load SSH known hosts file '" + knownHostsFile.getAbsolutePath() +
+                    "'. Check that the file is readable and contains valid OpenSSH host keys.",
+                e
+            );
+        }
+    }
+
+    private static class FilterLoggerFactory implements LoggerFactory {
+        private static final Set<String> FILTERED_OUT_CLASSES = Set.of("net.schmizz.sshj.common.StreamCopier");
+
+        @Override
+        public Logger getLogger(String s) {
+            if (FILTERED_OUT_CLASSES.contains(s)) {
+                return NOPLogger.NOP_LOGGER;
+            } else {
+                return org.slf4j.LoggerFactory.getLogger(s);
+            }
+        }
+
+        @Override
+        public Logger getLogger(Class<?> cls) {
+            return getLogger(cls.getName());
+        }
+    }
+}

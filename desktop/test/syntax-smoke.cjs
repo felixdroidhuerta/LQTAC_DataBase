@@ -1,0 +1,47 @@
+const { app, BrowserWindow } = require('electron');
+const assert = require('node:assert/strict');
+const { mkdtempSync } = require('node:fs');
+const { tmpdir } = require('node:os');
+const { join } = require('node:path');
+app.setPath('userData', mkdtempSync(join(tmpdir(), 'lqtac-syntax-smoke-')));
+require('../src/main.cjs');
+const timeout = setTimeout(() => { console.error('Syntax test timed out'); app.exit(1); }, 20000);
+app.whenReady().then(async () => {
+  const window = BrowserWindow.getAllWindows()[0]; const js = code => window.webContents.executeJavaScript(code);
+  window.webContents.setBackgroundThrottling(false);
+  const settled = () => js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+  try {
+    if (window.webContents.isLoading()) await new Promise(resolve=>window.webContents.once('did-finish-load',resolve));
+    console.log('Syntax: page loaded');
+    await js(`document.querySelector('.rail-button[data-view=sql]').click()`);
+    console.log('Syntax: editor visible');
+    const source = "-- Comentario\nSELECT COUNT(*), 'texto <img src=x onerror=alert(1)>', 123.5 FROM proyectos WHERE id=1;\nCREATE TABLE ejemplo(id INT);\n";
+    await js(`(()=>{const editor=document.querySelector('#query');editor.value=${JSON.stringify(source)};editor.dispatchEvent(new Event('input'));editor.setSelectionRange(10,20)})()`);
+    console.log('Syntax: input rendered');
+    await settled();
+    const rendered = await js(`(()=>{const editor=document.querySelector('#query');const layer=document.querySelector('.query-editor .sql-highlight-layer');return {text:layer.textContent,value:editor.value,selection:[editor.selectionStart,editor.selectionEnd],keywords:layer.querySelectorAll('.sql-token-keyword').length,strings:layer.querySelectorAll('.sql-token-string').length,numbers:layer.querySelectorAll('.sql-token-number').length,comments:layer.querySelectorAll('.sql-token-comment').length,colors:['.sql-token-keyword','.sql-token-string','.sql-token-number','.sql-token-comment'].map(selector=>getComputedStyle(layer.querySelector(selector)).color),images:layer.querySelectorAll('img').length,fontMatch:getComputedStyle(editor).font===getComputedStyle(layer).font,widthMatch:editor.clientWidth===layer.clientWidth,caret:getComputedStyle(editor).caretColor,ariaHidden:layer.getAttribute('aria-hidden')}})()`);
+    assert.equal(rendered.text, source+'\u200b'); assert.equal(rendered.value, source); assert.deepEqual(rendered.selection,[10,20]);
+    assert.ok(rendered.keywords>=5 && rendered.strings && rendered.numbers && rendered.comments);
+    assert.equal(new Set(rendered.colors).size,4); assert.equal(rendered.images,0);
+    assert.equal(rendered.fontMatch,true); assert.equal(rendered.widthMatch,true); assert.equal(rendered.ariaHidden,'true'); assert.notEqual(rendered.caret,'rgba(0, 0, 0, 0)');
+    await js(`(()=>{const editor=document.querySelector('#query');editor.value=Array.from({length:50},(_,i)=>'SELECT '+i+", '"+'largo_'.repeat(90)+"';").join('\\n');editor.dispatchEvent(new Event('input'));editor.scrollTop=100;editor.scrollLeft=220;editor.dispatchEvent(new Event('scroll'))})()`);
+    await settled();
+    const scroll = await js(`(()=>{const editor=document.querySelector('#query'),layer=document.querySelector('.query-editor .sql-highlight-layer');return {top:editor.scrollTop,left:editor.scrollLeft,highlightTop:layer.scrollTop,highlightLeft:layer.scrollLeft}})()`);
+    assert.ok(scroll.top>0 && scroll.left>0); assert.equal(scroll.top,scroll.highlightTop); assert.equal(scroll.left,scroll.highlightLeft);
+    await js(`document.querySelector('#query').dispatchEvent(new CompositionEvent('compositionstart'))`);
+    assert.equal(await js(`getComputedStyle(document.querySelector('.query-editor .sql-highlight-layer')).visibility`),'hidden');
+    await js(`document.querySelector('#query').dispatchEvent(new CompositionEvent('compositionend'));document.querySelector('#new-query').click()`);
+    await settled();
+    assert.match(await js(`document.querySelector('.query-editor .sql-highlight-layer').textContent`),/Nueva consulta/);
+    await js(`document.querySelector('.query-tab:first-child .tab-select').click()`); await settled();
+    assert.match(await js(`document.querySelector('.query-editor .sql-highlight-layer').textContent`),/SELECT 49/);
+    await js(`(()=>{document.querySelector('#trigger-editor-dialog').showModal();const body=document.querySelector('#trigger-body');body.value='BEGIN\\n SET NEW.nombre = UPPER(NEW.nombre);\\nEND';body.dispatchEvent(new Event('input'))})()`); await settled();
+    assert.ok(await js(`document.querySelector('#trigger-body').parentElement.querySelectorAll('.sql-token-keyword').length>=3`));
+    await js(`document.querySelector('#trigger-editor-dialog').close()`);
+    window.setSize(1000,680); await settled();
+    assert.equal(await js(`document.querySelector('#query').clientWidth===document.querySelector('.query-editor .sql-highlight-layer').clientWidth`),true);
+    assert.equal(await js('document.body.scrollWidth<=innerWidth'),true);
+    console.log('PASS: SQL token colors, exact source/caret/selection, escaped HTML, scroll alignment, tabs, IME, triggers and resize');
+    clearTimeout(timeout); app.exit(0);
+  } catch(error) { console.error(error); clearTimeout(timeout); app.exit(1); }
+});

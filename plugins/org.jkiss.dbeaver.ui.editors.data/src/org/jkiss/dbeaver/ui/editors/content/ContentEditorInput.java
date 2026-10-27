@@ -1,0 +1,451 @@
+/*
+ * DBeaver - Universal Database Manager
+ * Copyright (C) 2010-2026 DBeaver Corp and others
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.jkiss.dbeaver.ui.editors.content;
+
+import org.eclipse.core.resources.IStorage;
+import org.eclipse.core.runtime.CoreException;
+import org.eclipse.core.runtime.IPath;
+import org.eclipse.core.runtime.IProgressMonitor;
+import org.eclipse.core.runtime.Path;
+import org.eclipse.jface.resource.ImageDescriptor;
+import org.eclipse.ui.*;
+import org.eclipse.ui.editors.text.IEncodingSupport;
+import org.jkiss.code.NotNull;
+import org.jkiss.code.Nullable;
+import org.jkiss.dbeaver.DBException;
+import org.jkiss.dbeaver.Log;
+import org.jkiss.dbeaver.model.DBIcon;
+import org.jkiss.dbeaver.model.DBPContextProvider;
+import org.jkiss.dbeaver.model.DBValueFormatting;
+import org.jkiss.dbeaver.model.data.DBDContent;
+import org.jkiss.dbeaver.model.data.DBDContentCached;
+import org.jkiss.dbeaver.model.data.DBDContentStorage;
+import org.jkiss.dbeaver.model.data.storage.BytesContentStorage;
+import org.jkiss.dbeaver.model.data.storage.StringContentStorage;
+import org.jkiss.dbeaver.model.data.storage.TemporaryContentStorage;
+import org.jkiss.dbeaver.model.exec.DBCException;
+import org.jkiss.dbeaver.model.exec.DBCExecutionContext;
+import org.jkiss.dbeaver.model.runtime.DBRProgressMonitor;
+import org.jkiss.dbeaver.model.runtime.DefaultProgressMonitor;
+import org.jkiss.dbeaver.runtime.DBWorkbench;
+import org.jkiss.dbeaver.runtime.LocalFileStorage;
+import org.jkiss.dbeaver.ui.DBeaverIcons;
+import org.jkiss.dbeaver.ui.IRefreshablePart;
+import org.jkiss.dbeaver.ui.UIUtils;
+import org.jkiss.dbeaver.ui.data.IAttributeController;
+import org.jkiss.dbeaver.ui.data.IValueController;
+import org.jkiss.dbeaver.ui.data.managers.ContentValueManager;
+import org.jkiss.dbeaver.ui.editors.IStatefulEditorInput;
+import org.jkiss.dbeaver.ui.editors.StringEditorInput;
+import org.jkiss.dbeaver.utils.ContentUtils;
+import org.jkiss.dbeaver.utils.GeneralUtils;
+import org.jkiss.dbeaver.utils.RuntimeUtils;
+import org.jkiss.utils.CommonUtils;
+import org.jkiss.utils.IOUtils;
+
+import java.io.*;
+import java.nio.file.Files;
+
+/**
+ * ContentEditorInput
+ */
+public class ContentEditorInput implements IPathEditorInput, IStatefulEditorInput, DBPContextProvider, IEncodingSupport {
+    private static final Log log = Log.getLog(ContentEditorInput.class);
+
+    private IValueController valueController;
+    private final IEditorPart[] editorParts;
+    private final IEditorPart defaultPart;
+
+    private boolean contentDetached = false;
+    private File contentFile;
+    private String fileCharset;
+    private StringEditorInput.StringStorage stringStorage;
+
+    public ContentEditorInput(
+        @NotNull IValueController valueController,
+        @Nullable IEditorPart[] editorParts,
+        @Nullable IEditorPart defaultPart,
+        @NotNull DBRProgressMonitor monitor
+    )
+    throws DBException {
+        this.valueController = valueController;
+        this.editorParts = editorParts;
+        this.defaultPart = defaultPart;
+        this.fileCharset = getDefaultEncoding();
+        this.prepareContent(monitor);
+    }
+
+    public ContentEditorInput(
+        @NotNull IValueController valueController,
+        @Nullable IEditorPart[] editorParts,
+        @Nullable IEditorPart defaultPart,
+        @Nullable String charset,
+        @NotNull DBRProgressMonitor monitor
+    )
+    throws DBException {
+        this.valueController = valueController;
+        this.editorParts = editorParts;
+        this.defaultPart = defaultPart;
+        this.fileCharset = CommonUtils.isEmpty(charset) ? getDefaultEncoding() : charset;
+        this.prepareContent(monitor);
+    }
+
+    public IValueController getValueController() {
+        return valueController;
+    }
+
+    public void refreshContent(DBRProgressMonitor monitor, IValueController valueController) throws DBException {
+        this.valueController = valueController;
+        this.prepareContent(monitor);
+    }
+
+    public void refreshContent(DBRProgressMonitor monitor, IValueController valueController, @Nullable String charset) throws DBException {
+        this.valueController = valueController;
+        this.fileCharset = CommonUtils.isEmpty(charset) ? getDefaultEncoding() : charset;
+        this.prepareContent(monitor);
+    }
+
+    public boolean isInMemory() {
+        return stringStorage != null;
+    }
+
+    IEditorPart[] getEditors() {
+        return editorParts;
+    }
+
+    public IEditorPart getDefaultEditor() {
+        return defaultPart;
+    }
+
+    @Override
+    public boolean exists() {
+        return false;
+    }
+
+    @Override
+    public ImageDescriptor getImageDescriptor() {
+        return DBeaverIcons.getImageDescriptor(DBIcon.TYPE_LOB);
+    }
+
+    @Override
+    public String getName() {
+        String inputName;
+        if (valueController instanceof IAttributeController attributeController) {
+            inputName = attributeController.getColumnId();
+        } else {
+            inputName = valueController.getValueName();
+        }
+        if (isReadOnly()) {
+            inputName += " [Read Only]";
+        }
+        return inputName;
+    }
+
+    @Nullable
+    @Override
+    public IPersistableElement getPersistable() {
+        return null;
+    }
+
+    @Override
+    public String getToolTipText() {
+        return getName();
+    }
+
+    @Nullable
+    @Override
+    public <T> T getAdapter(Class<T> adapter) {
+        if (adapter == IStorage.class) {
+            if (stringStorage != null) {
+                return adapter.cast(stringStorage);
+            } else {
+                return adapter.cast(new LocalFileStorage(contentFile, fileCharset));
+            }
+        }
+        return null;
+    }
+
+    @Nullable
+    public Object getValue() {
+        // Content loading and extraction may run in background jobs.
+        Object[] value = new Object[1];
+        UIUtils.syncExec(() -> value[0] = valueController.getValue());
+        return value[0];
+    }
+
+    public long getContentLength() {
+        if (stringStorage != null) {
+            return stringStorage.getLength();
+        } else if (contentFile != null) {
+            return contentFile.length();
+        } else {
+            return 0;
+        }
+    }
+
+    private void prepareContent(DBRProgressMonitor monitor) throws DBException {
+        Object value = getValue();
+        if (!(value instanceof DBDContent content)) {
+            // No need to do init
+            stringStorage = new StringEditorInput(getName(), CommonUtils.toString(value), isReadOnly(), fileCharset).getStorage();
+            return;
+        }
+
+        if (contentDetached) {
+            release();
+            contentFile = null;
+            contentDetached = false;
+        }
+        {
+            // Editors must not write directly to the model's storage before an edit is recorded.
+            try {
+                // Create file
+                if (contentFile == null) {
+                    String valueId;
+                    if (valueController instanceof IAttributeController attributeController) {
+                        valueId = attributeController.getColumnId();
+                    } else {
+                        valueId = valueController.getValueName();
+                    }
+
+                    contentFile = ContentUtils.createTempContentFile(monitor, DBWorkbench.getPlatform(), valueId).toFile();
+                } else if (!contentFile.canWrite()) {
+                    markReadOnly(false);
+                }
+
+                // Write value to file
+                copyContentToFile(content, monitor);
+            } catch (IOException e) {
+                // Delete temp file
+                if (contentFile != null && contentFile.exists()) {
+                    if (!contentFile.delete()) {
+                        log.warn("Can't delete temporary content file '" + contentFile.getAbsolutePath() + "'");
+                    }
+                }
+                throw new DBException("Can't delete content file", e);
+            }
+        }
+
+        // Mark file as readonly
+        if (valueController.isReadOnly()) {
+            markReadOnly(true);
+        }
+    }
+
+    private void markReadOnly(boolean readOnly) throws DBException {
+        if (!contentFile.setWritable(!readOnly)) {
+            throw new DBException("Can't set content read-only");
+        }
+    }
+
+    public void release() {
+        if (contentFile != null && !contentDetached) {
+            if (!contentFile.delete()) {
+                log.warn("Can't delete temp file '" + contentFile.getAbsolutePath() + "'");
+            }
+            contentDetached = true;
+        }
+        stringStorage = null;
+    }
+
+    @Nullable
+    @Override
+    public IPath getPath() {
+        return contentFile == null ?
+            new Path("fake_path") : // To avoid NPE from the Eclipse
+            new Path(contentFile.getAbsolutePath());
+    }
+
+    public boolean isReadOnly() {
+        return valueController.isReadOnly();
+    }
+
+    void saveToExternalFile(@NotNull java.nio.file.Path file, @NotNull IProgressMonitor monitor) throws CoreException {
+        try (InputStream is = openContents()) {
+            ContentUtils.saveContentToFile(
+                is,
+                file,
+                RuntimeUtils.makeMonitor(monitor)
+            );
+        } catch (Exception e) {
+            throw new CoreException(GeneralUtils.makeExceptionStatus(e));
+        }
+    }
+
+    @NotNull
+    private InputStream openContents() throws Exception {
+        return stringStorage == null ? new FileInputStream(contentFile) : stringStorage.getContents();
+    }
+
+    void loadFromExternalFile(@NotNull java.nio.file.Path extFile, @NotNull IProgressMonitor monitor) throws CoreException {
+        try {
+            release();
+            contentFile = extFile.toFile();
+            contentDetached = true;
+            Object value = getValue();
+            if (value instanceof DBDContent) {
+                Object editedValue = extractContentFromFile(new DefaultProgressMonitor(monitor));
+                UIUtils.syncExec(() -> valueController.updateValue(editedValue, true));
+            } else {
+                updateStringValueFromFile(extFile);
+            }
+            refreshContentParts(extFile);
+        } catch (Throwable e) {
+            throw new CoreException(GeneralUtils.makeExceptionStatus(e));
+        }
+    }
+
+    private void updateStringValueFromFile(@NotNull java.nio.file.Path extFile) throws DBException {
+        try (Reader is = Files.newBufferedReader(extFile)) {
+            String str = IOUtils.readToString(is);
+            stringStorage.setString(str);
+            UIUtils.syncExec(() -> valueController.updateValue(str, true));
+
+        } catch (IOException e) {
+            throw new DBException("Error reading content from file", e);
+        }
+    }
+
+    void refreshContentParts(Object source) {
+        // Refresh editor parts
+        for (IEditorPart cePart : editorParts) {
+            if (cePart instanceof IRefreshablePart refreshablePart) {
+                refreshablePart.refreshPart(source, false);
+            }
+        }
+    }
+
+    private void copyContentToFile(
+        @NotNull DBDContent contents,
+        @NotNull DBRProgressMonitor monitor
+    ) throws DBException, IOException {
+        DBDContentStorage storage = contents.getContents(monitor);
+
+        markReadOnly(false);
+
+        try (OutputStream os = new FileOutputStream(contentFile)) {
+            if (contents.isNull()) {
+                ContentUtils.copyStreams(new ByteArrayInputStream(new byte[0]), 0, os, monitor);
+            } else {
+                if (storage == null) {
+                    log.warn("Can't get data from null storage");
+                    return;
+                }
+                try (InputStream is = storage.getContentStream()) {
+                    ContentUtils.copyStreams(is, storage.getContentLength(), os, monitor);
+                }
+            }
+        }
+
+        markReadOnly(valueController.isReadOnly());
+    }
+
+    @Nullable
+    Object extractContentFromFile(@NotNull DBRProgressMonitor monitor) throws DBException {
+        Object originalValue = getValue();
+        Object editedValue = originalValue instanceof DBDContent content
+            ? ContentValueManager.copyContentForEdit(monitor, content) : originalValue;
+        try {
+            updateContentFromFile(monitor, editedValue);
+            return editedValue instanceof DBDContent ? editedValue : getValue();
+        } catch (DBException e) {
+            if (editedValue != originalValue && editedValue instanceof DBDContent content) {
+                content.release();
+            }
+            throw e;
+        }
+    }
+
+    public void updateContentFromFile(@NotNull DBRProgressMonitor monitor, Object value) throws DBException {
+        if (valueController.isReadOnly()) {
+            throw new DBCException("Can't update read-only value");
+        }
+
+        if (value instanceof DBDContent content) {
+            DBDContentStorage storage = content.getContents(monitor);
+            if (storage instanceof DBDContentCached) {
+                // Create new storage and pass it to content
+                try (FileInputStream is = new FileInputStream(contentFile)) {
+                    if (ContentUtils.isTextContent(content)) {
+                        try (Reader reader = new InputStreamReader(is, fileCharset)) {
+                            storage = StringContentStorage.createFromReader(reader);
+                        }
+                    } else {
+                        storage = BytesContentStorage.createFromStream(is, contentFile.length(), fileCharset);
+                    }
+                    //StringContentStorage.
+                    content.updateContents(monitor, storage);
+                } catch (IOException e) {
+                    throw new DBException("Error reading content from file", e);
+                }
+            } else {
+                // Keep the editor file independent of the value installed in the model.
+                try {
+                    storage = new TemporaryContentStorage(
+                        DBWorkbench.getPlatform(), contentFile.toPath(), fileCharset, false).cloneStorage(monitor);
+                } catch (IOException e) {
+                    throw new DBException("Error copying content from file", e);
+                }
+                boolean acquired = false;
+                try {
+                    acquired = content.updateContents(monitor, storage);
+                } finally {
+                    if (!acquired) {
+                        storage.release();
+                    }
+                }
+            }
+        } else if (stringStorage != null) {
+            // Just read as string
+            valueController.updateValue(stringStorage.getString(), false);
+            contentDetached = true;
+        }
+    }
+
+    @Nullable
+    @Override
+    public DBCExecutionContext getExecutionContext() {
+        return valueController.getExecutionContext();
+    }
+
+    public String getEncoding() {
+        return fileCharset;
+    }
+
+    @Override
+    public String getDefaultEncoding() {
+        if (valueController.getExecutionContext() == null) {
+            return GeneralUtils.getDefaultFileEncoding();
+        }
+        return DBValueFormatting.getDefaultBinaryFileEncoding(valueController.getExecutionContext().getDataSource());
+    }
+
+    public void setEncoding(@NotNull String fileCharset) {
+        this.fileCharset = fileCharset;
+        for (IEditorPart part : editorParts) {
+            try {
+                if (part instanceof IReusableEditor reusableEditor) {
+                    reusableEditor.setInput(this);
+                } else {
+                    part.init(part.getEditorSite(), this);
+                }
+            } catch (PartInitException e) {
+                log.error("Error refreshing content editor part " + part, e);
+            }
+        }
+    }
+}
