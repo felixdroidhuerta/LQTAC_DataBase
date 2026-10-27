@@ -29,17 +29,20 @@ class SQLServerAdapter {
     this.catalogDirty = false;
     return catalogFromRows((names.results[0]?.values || []).map(([name]) => name), objects.results[0]?.values || [], database);
   }
-  async execute(sql) { validateSQL(sql); return this.run(sql); }
-  async run(sql, limit = 1000) {
+  async execute(sql, { timeoutMs = 30000, rowLimit = 1000, managed = false } = {}) { validateSQL(sql); return this.run(sql, rowLimit || Infinity, managed ? 0 : timeoutMs); }
+  async run(sql, limit = 1000, timeoutMs = 30000) {
     if (!this.alive) throw new Error('La sesión está cerrada. Vuelve a conectar.');
     const started = performance.now(); const collector = resultCollector(limit); const results = []; let current; let changes = 0;
     return new Promise((resolve, reject) => {
       let failed;
       const request = new Request(sql, error => {
-        if (error?.code === 'ETIMEOUT' || failed) this.close();
+        this.activeRequest = null;
+        if (failed) this.close();
         if (error || failed) reject(failed || error);
         else resolve({ results, changes, elapsed: Math.round(performance.now() - started) });
       });
+      request.setTimeout(timeoutMs);
+      this.activeRequest = request;
       request.on('columnMetadata', fields => { current = fields.length ? collector.create(fields.map(field => field.colName)) : null; if (current) results.push(current); });
       request.on('row', row => { if (!current || failed) return; try { collector.append(current, row.map(column => column.value)); } catch (error) { failed = error; request.cancel(); } });
       const done = count => { if (!current && Number.isFinite(count)) changes += count; current = null; };

@@ -22,11 +22,13 @@
   <link rel="stylesheet" href="dark.css">
   <link rel="stylesheet" href="object-editor.css">
   <link rel="stylesheet" href="cell-copy.css">
+  <link rel="stylesheet" href="settings.css">
+  <link rel="stylesheet" href="result-editor.css">
 </head>
 <body>
   <aside class="rail"><div class="monogram"><img src="../../../assets/branding/app-icon.png" alt="LQTAC Data Base"></div><button class="rail-button active" data-view="home" title="Inicio">⌂</button><button class="rail-button" data-view="connections" title="Conexiones" aria-label="Conexiones">⇄</button><button class="rail-button" data-view="sql" title="Editor SQL">⌘</button><button class="rail-button" data-view="modules" title="Módulos">▦</button><span class="rail-bottom">0.1</span></aside>
   <aside class="sidebar" id="sidebar">
-    <div class="brand"><img src="../../../assets/branding/app-icon.png" alt=""><div class="brand-name">LQTAC<span>Data Base</span></div></div>
+    <div class="brand" aria-label="LQTAC Data Base"><img class="brand-icon" src="../../../assets/branding/app-icon.png" alt=""><div class="brand-wordmark"><img class="brand-wordmark-light" src="../../../assets/branding/lqtac-data-base.png" alt="LQTAC Data Base"><img class="brand-wordmark-dark" src="../../../assets/branding/lqtac-data-base-white.png" alt="LQTAC Data Base"></div></div>
     <div class="sidebar-bottom">
     <div class="section-title"><span>EXPLORADOR</span><div><button id="refresh-explorer" title="Actualizar conexiones y objetos de la sesión activa">↻</button><button id="new-profile-side" title="Nueva conexión" aria-label="Nueva conexión">＋</button><button id="open-side" title="Abrir archivo SQLite">▤</button></div></div>
     <label class="explorer-search"><input id="explorer-filter" type="search" placeholder="Filtrar bases y objetos…" aria-label="Filtrar bases de datos y objetos"></label>
@@ -71,7 +73,7 @@
         <div id="table-completions" class="completion-panel hidden" role="listbox" aria-label="Tablas y vistas sugeridas"></div>
       </div>
       <div id="editor-splitter" class="panel-splitter horizontal-splitter" role="separator" aria-orientation="horizontal" aria-label="Ajustar altura del editor SQL y los resultados" aria-controls="query" tabindex="0" title="Arrastra para repartir el espacio entre SQL y resultados. Doble clic para restablecer."></div>
-      <div class="results-header"><div class="heading-tools"><strong>Resultados</strong><div class="mini-tools" role="toolbar" aria-label="Herramientas de resultados"><button id="export-csv" class="mini-tool" aria-label="Exportar CSV" data-hint="Exportar CSV · Guarda el resultado elegido, con las filas visibles" disabled>⇩ CSV</button><button id="export-xlsx" class="mini-tool" aria-label="Exportar XLSX" data-hint="Exportar XLSX · Libro Excel con el resultado elegido" disabled>⇩ XLSX</button><label class="mini-tool" data-hint="Máximo de filas visibles y exportadas · No añade LIMIT al SQL ni limita escrituras">Filas <select id="result-limit" aria-label="Límite de filas visibles"><option>50</option><option>100</option><option>500</option><option selected>1000</option></select></label><select id="export-result-index" aria-label="Resultado para exportar" data-hint="Elige qué resultado exportar si la consulta devuelve varios" hidden></select></div></div><label class="wrap-results-option"><input id="wrap-results" type="checkbox"> Ajustar texto</label><span id="query-info">Listo para ejecutar</span></div>
+      <div class="results-header"><div class="heading-tools"><strong>Resultados</strong><div class="mini-tools" role="toolbar" aria-label="Herramientas de resultados"><button id="export-csv" class="mini-tool" aria-label="Exportar CSV" data-hint="Exportar CSV · Guarda el resultado elegido, con las filas visibles" disabled>⇩ CSV</button><button id="export-xlsx" class="mini-tool" aria-label="Exportar XLSX" data-hint="Exportar XLSX · Libro Excel con el resultado elegido" disabled>⇩ XLSX</button><label class="mini-tool" data-hint="Máximo de filas visibles y exportadas · No añade LIMIT al SQL ni limita escrituras">Filas <select id="result-limit" aria-label="Límite de filas visibles"><option>50</option><option>100</option><option>500</option><option selected>1000</option><option value="0">Sin límite</option></select></label><select id="export-result-index" aria-label="Resultado para exportar" data-hint="Elige qué resultado exportar si la consulta devuelve varios" hidden></select></div></div><label class="wrap-results-option"><input id="wrap-results" type="checkbox"> Ajustar texto</label><span id="query-info">Listo para ejecutar</span></div>
       <div id="results" class="results"><div class="result-placeholder">Los resultados de tus consultas aparecerán aquí.</div></div>
       </div></div>
       <p id="execution-note" class="editor-note">Trabajas sobre una copia en memoria. «Guardar copia» exporta el estado actual a un archivo SQLite. Los cambios se pierden al cambiar de base o cerrar la aplicación.</p>
@@ -84,7 +86,7 @@
       <div class="designer-footer">Los cambios del formulario están pendientes hasta revisar y aplicar el SQL en el servidor. Los atributos avanzados no editados permanecen en su definición original.</div>
     </section>
     <section id="modules" class="view hidden"><div class="eyebrow">ARQUITECTURA MODULAR</div><h1>Tu caja de herramientas<span>.</span></h1><p class="intro">Cada módulo tiene una responsabilidad propia. Esta es la disponibilidad real de esta versión.</p><div id="module-list" class="module-list"></div></section>
-    <footer><span><i class="dot" id="status-dot"></i> <span id="status">Sin conexión</span></span><span>LQTAC Data Base <b>0.1.0</b></span></footer>
+    <footer><span><i class="dot" id="status-dot"></i> <span id="status">Sin conexión</span></span><span>LQTAC Data Base <b>0.1.6</b></span></footer>
   </main>
   <div id="toast" role="status" class="toast hidden"></div>
   <div id="connection-context-menu" class="connection-context hidden" role="menu" aria-label="Acciones de conexiones"></div>

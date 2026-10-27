@@ -1,5 +1,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('lqtac', Object.freeze({
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  openResultEdit: (token,index) => ipcRenderer.invoke('results:edit-open',token,index),
+  applyResultEdits: request => ipcRenderer.invoke('results:edit-apply',request),
+  onResultEditProgress: callback => {const handler=(_event,data)=>callback(data);ipcRenderer.on('results:edit-progress',handler);return ()=>ipcRenderer.removeListener('results:edit-progress',handler);},
+  saveSettings: value => ipcRenderer.invoke('settings:save', value),
   writeClipboard: text => ipcRenderer.invoke('clipboard:write',text),
   openSQL: () => ipcRenderer.invoke('sql:open'),
   saveSQL: request => ipcRenderer.invoke('sql:save',request),
@@ -28,6 +33,8 @@ contextBridge.exposeInMainWorld('lqtac', Object.freeze({
   execute: (sql, sessionKey,limit,context) => ipcRenderer.invoke('database:execute', sql, sessionKey,limit,context),
   planExecution: (source,options,key) => ipcRenderer.invoke('query:plan',source,options,key),
   executeBatch: (statements,key,limit,context,runId) => ipcRenderer.invoke('database:batch',statements,key,limit,context,runId),
+  cancelQuery: (runId,key) => ipcRenderer.invoke('database:cancel',runId,key),
+  onExecutionReleased: callback => {const handler=(_event,data)=>callback(data);ipcRenderer.on('execution:released',handler);return ()=>ipcRenderer.removeListener('execution:released',handler);},
   onExecutionProgress: callback => {const handler=(_event,data)=>callback(data);ipcRenderer.on('execution:progress',handler);return ()=>ipcRenderer.removeListener('execution:progress',handler);},
   formatQuery: (source,engine) => ipcRenderer.invoke('query:format',source,engine),
   columns: (tables,key) => ipcRenderer.invoke('database:columns',tables,key),

@@ -1,6 +1,6 @@
 {
   "name": "lqtac-database",
-  "version": "0.1.0",
+  "version": "0.1.6",
   "private": true,
   "description": "LQTAC Data Base — espacio de trabajo modular para bases de datos",
   "main": "src/main.cjs",
@@ -21,7 +21,9 @@
     "test:objects": "electron test/columns-objects-smoke.cjs",
     "test:results": "electron test/results-grid-smoke.cjs",
     "test:workflow": "electron test/copy-files-reconnect-smoke.cjs",
-    "test:statements": "electron test/statement-runner-smoke.cjs"
+    "test:statements": "electron test/statement-runner-smoke.cjs",
+    "test:settings": "electron test/settings-indent-smoke.cjs",
+    "test:data-edit": "electron test/result-edit-smoke.cjs"
   },
   "dependencies": {
     "mysql2": "3.24.6",

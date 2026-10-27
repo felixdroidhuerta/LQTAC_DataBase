@@ -15,6 +15,7 @@ test('PostgreSQL actual wire driver: schemas, rows, multiple results, DML counts
     const result = await adapter.execute('SELECT 1 MULTI'); assert.equal(result.results.length, 2); assert.equal(result.results[1].values.length, 0); assert.equal(result.results[0].values[0][1], 'Ana');
     const large = (await adapter.execute('SELECT * FROM large')).results[0]; assert.equal(large.values.length, 1000); assert.equal(large.truncated, true);
     assert.equal((await adapter.execute('UPDATE clientes SET name=\'Test\'')).changes, 3);
+    await adapter.execute('SELECT 1', { timeoutMs: 90000 }); assert.ok(server.queries.includes('SET statement_timeout TO 90000'));
     await assert.rejects(adapter.execute('SYNTAX_ERROR'), /syntax error/); assert.equal(adapter.alive, true);
     await adapter.selectDatabase('sales'); assert.equal(await adapter.currentDatabase(), 'sales');
     await adapter.selectDatabase('a"b'); assert.match(server.queries.at(-1), /"a""b"/);
@@ -31,6 +32,7 @@ test('SQL Server adapter uses persistent TDS batches, metadata, TOP-compatible r
     const large = (await adapter.execute('SELECT * FROM large')).results[0]; assert.equal(large.values.length, 1000); assert.equal(large.truncated, true);
     assert.equal((await adapter.execute('UPDATE dbo.clientes SET nombre=\'Test\'')).changes, 1);
     await adapter.execute('USE [other]'); assert.equal(adapter.catalogDirty, true); await adapter.catalog(); assert.equal(adapter.databaseName, 'other'); assert.equal(adapter.catalogDirty, false);
+    await adapter.execute('SELECT 1', { timeoutMs: 90000 }); assert.equal(connection.lastRequestTimeout, 90000);
     await assert.rejects(adapter.execute('SYNTAX_ERROR'), /Incorrect syntax/); assert.equal(adapter.alive, true);
   } finally { adapter.close(); }
   assert.equal(connection.closed, true);
@@ -48,6 +50,7 @@ test('Oracle Thin adapter: service/TLS config, schema, resultset cleanup, DML wi
     await adapter.execute('UPDATE CLIENTES SET NAME=\'Test\';'); assert.equal(connection.pendingWrites, 1); assert.equal(connection.queries.at(-1).options.autoCommit, false);
     await adapter.execute('COMMIT;'); assert.equal(connection.committed, true);
     await adapter.selectDatabase('SALES'); assert.equal(await adapter.currentDatabase(), 'SALES');
+    await adapter.execute('SELECT 1 FROM DUAL', { timeoutMs: 90000 }); assert.equal(connection.queries.at(-1).callTimeout, 90000); assert.equal(connection.callTimeout, 30000);
     await assert.rejects(adapter.execute('SYNTAX_ERROR;'), /ORA-00900/);
   } finally { adapter.close(); }
   assert.equal(connection.closed, true);

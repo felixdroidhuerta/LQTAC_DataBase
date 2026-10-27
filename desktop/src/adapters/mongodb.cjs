@@ -1,4 +1,5 @@
 const { MongoClient, BSON } = require('mongodb');
+const { randomUUID } = require('node:crypto');
 
 function parseCommand(source) {
   if (typeof source !== 'string' || !source.trim() || source.length > 1_000_000) throw new Error('Escribe un comando JSON de hasta 1 MB.');
@@ -48,28 +49,34 @@ class MongoDBAdapter {
     if (typeof name !== 'string' || !name || name.length > 255 || /[\/\\. "$\0]/.test(name)) throw new Error('Base de datos MongoDB no válida.');
     this.database = name;
   }
-  async execute(source) {
+  async execute(source, { timeoutMs = 30000, rowLimit = 1000, managed = false, signal } = {}) {
     if (!this.alive) throw new Error('La sesión está cerrada. Vuelve a conectar.');
     const parsed = parseCommand(source); const { $db, ...command } = parsed;
     if ($db !== undefined && (typeof $db !== 'string' || !$db || $db.length > 255 || /[\/\\. "$\0]/.test($db))) throw new Error('El campo $db debe indicar una base válida.');
     const started = performance.now(); const db = this.client.db($db || this.database);
     const kind = Object.keys(command)[0]; let result; let changes = 0;
     if (!kind) throw new Error('El comando JSON está vacío.');
+    signal?.throwIfAborted();
+    const queryId = randomUUID(); this.activeQueryId = queryId; this.queryAbort = new AbortController();
+    const commandOptions = { timeoutMS: managed ? timeoutMs + 10000 : timeoutMs, signal: this.queryAbort.signal };
+    command.comment = { lqtacRequestId: queryId, ...(command.comment === undefined ? {} : { original: command.comment }) };
+    try {
     if (kind === 'aggregate' && !command.cursor) command.cursor = {};
     // Cursor commands are consumed through the driver so getMore and cursor cleanup work.
     if (['find', 'aggregate', 'listCollections', 'listIndexes'].includes(kind)) {
-      const cursor = db.runCursorCommand({ ...command, maxTimeMS: 30000 });
+      const cursor = db.runCursorCommand({ ...command, maxTimeMS: timeoutMs }, { ...commandOptions, timeoutMode: 'cursorLifetime' });
       const documents = []; let bytes = 0;
-      try { for await (const document of cursor) { bytes += BSON.calculateObjectSize(document); if (bytes > 16 * 1024 * 1024) throw new Error('El resultado supera 16 MB. Utiliza projection, filtros o limit.'); documents.push(document); if (documents.length === 1001) break; } }
+      try { for await (const document of cursor) { bytes += BSON.calculateObjectSize(document); if (bytes > 16 * 1024 * 1024) throw new Error('El resultado supera 16 MB. Utiliza projection, filtros o limit.'); documents.push(document); if (rowLimit !== 0 && documents.length > rowLimit) break; } }
       finally { await cursor.close(); }
-      result = documentsResult(documents.slice(0, 1000), documents.length > 1000);
+      result = documentsResult(rowLimit === 0 ? documents : documents.slice(0, rowLimit), rowLimit !== 0 && documents.length > rowLimit);
     } else {
       if (['getMore', 'killCursors'].includes(kind)) throw new Error('Los cursores se gestionan automáticamente. Usa find o aggregate.');
-      const response = await db.command({ ...command, maxTimeMS: 30000 });
+      const response = await db.command({ ...command, maxTimeMS: timeoutMs }, commandOptions);
       changes = typeof response.n === 'number' ? response.n : 0;
       result = documentsResult([response]);
     }
     return { results: [result], changes, elapsed: Math.round(performance.now() - started) };
+    } finally { if (this.activeQueryId === queryId) { this.activeQueryId = null; this.queryAbort = null; } }
   }
   close() { this.alive = false; this.client.close().catch(() => {}); }
 }

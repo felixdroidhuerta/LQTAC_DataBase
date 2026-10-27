@@ -6,7 +6,7 @@ test('formatting preserves literals/comments and supports SQL dialects without e
   assert.equal(JSON.parse(formatQuery('{"find":"t","filter":{}}','mongodb')).find,'t');assert.throws(()=>formatQuery('select 1','invalid'),/Motor/);
 });
 test('UI row caps preserve columns and mark truncation without mutating the query results',()=>{
-  const original={results:[{columns:['x'],values:Array.from({length:80},(_,n)=>[n]),truncated:false}],changes:3};const limited=visibleResults(original,50);assert.equal(limited.results[0].values.length,50);assert.equal(limited.results[0].truncated,true);assert.equal(original.results[0].values.length,80);assert.equal(limited.changes,3);assert.throws(()=>visibleResults(original,0));
+  const original={results:[{columns:['x'],values:Array.from({length:80},(_,n)=>[n]),truncated:false}],changes:3};const limited=visibleResults(original,50);assert.equal(limited.results[0].values.length,50);assert.equal(limited.results[0].truncated,true);assert.equal(original.results[0].values.length,80);assert.equal(limited.changes,3);assert.equal(visibleResults(original,0).results[0].values.length,80);assert.equal(visibleResults(original,0).results[0].truncated,false);assert.throws(()=>visibleResults(original,-1));
 });
 test('CSV and XLSX preserve Unicode, quotes, numbers, duplicate headers, nulls and formula-like text',async()=>{
   const result={columns:['id','texto','texto'],values:[[1,'á,"b"\nnext',null],[2,'=1+1','0000123'],[-3,'@SUM(A1)','9007199254740993']]};
@@ -17,3 +17,12 @@ test('CSV and XLSX preserve Unicode, quotes, numbers, duplicate headers, nulls a
 test('relationship graph reads declared SQLite foreign keys and groups composite edges',async()=>{
   const adapter=await SQLiteAdapter.open();try{adapter.execute('CREATE TABLE parent(id INTEGER PRIMARY KEY);CREATE TABLE child(id INTEGER, parent_id INTEGER REFERENCES parent(id));');const schemas=[{name:'main',objects:adapter.schema()}];const graph=await readRelations(adapter,'sqlite','main',schemas);assert.equal(graph.edges.length,1);assert.equal(graph.edges[0].columns[0].from,'parent_id');assert.deepEqual(JSON.parse(graph.edges[0].to),['main','parent']);const compound=relationGraph([['fk','a','c','x','a','p','i'],['fk','a','c','y','a','p','j']],[]);assert.equal(compound.edges.length,1);assert.equal(compound.edges[0].columns.length,2);assert.match((await readRelations({},'mongodb','main',schemas)).warning,/No se deducen/);}finally{adapter.close();}
 });
+
+ test('unlimited rows reach SQLite through execution settings and preserve explicit SQL limits',async()=>{
+ const {executeTimed}=require('../src/settings.cjs'); const adapter=await SQLiteAdapter.open();
+ try {const sql='WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<1500) SELECT x FROM n';
+ const capped=await executeTimed(adapter,'sqlite',sql,30000,{rowLimit:50});assert.equal(capped.results[0].values.length,50);assert.equal(capped.results[0].truncated,true);
+ const all=visibleResults(await executeTimed(adapter,'sqlite',sql,30000,{rowLimit:0}),0);assert.equal(all.results[0].values.length,1500);assert.equal(all.results[0].truncated,false);
+ assert.equal((await executeTimed(adapter,'sqlite',sql+' LIMIT 7',30000,{rowLimit:0})).results[0].values.length,7);
+ }finally{adapter.close();}
+ });

@@ -1,0 +1,7 @@
+{
+  "tool": "image_gen (built-in)",
+  "source": "assets/branding/lqtac-data-base.png",
+  "output": "assets/branding/lqtac-data-base-white.png",
+  "prompt": "Edit supplied LQTAC Data Base wordmark into a white monochrome variant on transparency. Preserve original distinctive letter geometry, exact text, spacing and two-line arrangement. No new symbols, border, glow, shadow or redesign. Intended for application sidebar and PDF cover on navy backgrounds.",
+  "usage": "Original blue/dark text in light theme. White variant in dark theme and PDF cover. Original app icon retained."
+}

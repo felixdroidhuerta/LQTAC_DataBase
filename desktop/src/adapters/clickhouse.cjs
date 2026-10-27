@@ -28,15 +28,25 @@ class ClickHouseAdapter {
     try { await next.command({ query: 'SELECT 1' }); } catch (error) { await next.close(); throw error; }
     const previous = this.client; this.client = next; this.config.database = name; this.database = name; await previous.close();
   }
-  async execute(sql) {
+  async execute(sql, { timeoutMs = 30000, rowLimit = 1000, managed = false, signal } = {}) {
     if (!this.alive) throw new Error('La sesión está cerrada. Vuelve a conectar.');
     if (typeof sql !== 'string' || !sql.trim() || sql.length > 1_000_000) throw new Error('Escribe una consulta de hasta 1 MB.');
+    const requestTimeout = managed ? timeoutMs + 10000 : timeoutMs;
+    const queryId = randomUUID(); this.activeQueryId = queryId; this.queryAbort = new AbortController();
+    try {
+    if (this.config.request_timeout !== requestTimeout) {
+      const previous = this.client;
+      this.config.request_timeout = requestTimeout;
+      this.client = createClient(this.config);
+      await previous.close();
+    }
     const started = performance.now();
     const use = /^\s*USE\s+(?:`((?:``|[^`])+)`|([\w]+))\s*;?\s*$/i.exec(sql);
     if (use) { await this.selectDatabase((use[1] || use[2]).replaceAll('``', '`')); return { results: [], changes: 0, elapsed: Math.round(performance.now() - started) }; }
     // The HTTP default format preserves the user's statement, including INSERT/DDL.
-    const response = await this.client.exec({ query: sql, http_headers: { 'X-ClickHouse-Format': 'JSONCompact' },
-      clickhouse_settings: { max_result_rows: 1001, result_overflow_mode: 'break', max_execution_time: 30 } });
+    signal?.throwIfAborted();
+    const response = await this.client.exec({ query: sql, query_id: queryId, abort_signal: this.queryAbort.signal, http_headers: { 'X-ClickHouse-Format': 'JSONCompact' },
+      clickhouse_settings: { max_result_rows: rowLimit === 0 ? 0 : rowLimit + 1, result_overflow_mode: 'break', max_execution_time: timeoutMs / 1000 } });
     let size = 0; const chunks = [];
     for await (const chunk of response.stream) {
       size += chunk.length;
@@ -48,7 +58,8 @@ class ClickHouseAdapter {
     let data;
     try { data = JSON.parse(text); } catch { throw new Error('El resultado no es JSONCompact. Omite FORMAT o utiliza FORMAT JSONCompact.'); }
     if (!Array.isArray(data.meta) || !Array.isArray(data.data)) throw new Error('Formato de resultado ClickHouse no compatible. Utiliza JSONCompact.');
-    return { results: [{ columns: data.meta.map(field => field.name), values: data.data.slice(0, 1000).map(row => row.map(cell)), truncated: data.data.length > 1000 }], changes: 0, elapsed: Math.round(performance.now() - started) };
+    return { results: [{ columns: data.meta.map(field => field.name), values: (rowLimit === 0 ? data.data : data.data.slice(0, rowLimit)).map(row => row.map(cell)), truncated: rowLimit !== 0 && data.data.length > rowLimit }], changes: 0, elapsed: Math.round(performance.now() - started) };
+    } finally { if (this.activeQueryId === queryId) { this.activeQueryId = null; this.queryAbort = null; } }
   }
   close() { this.alive = false; this.client.close().catch(() => {}); }
 }

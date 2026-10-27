@@ -32,6 +32,8 @@ const {SQLFiles}=require('./sql-files.cjs');
 const {restoreQueryContext}=require('./query-context.cjs');
 const {createHash}=require('node:crypto');
 const {planExecution}=require('./sql-statements.cjs');
+const {SettingsStore,executeTimed}=require('./settings.cjs');
+const {ResultEdits,decorateResult}=require('./result-edit.cjs');
 const { inspectTable, buildTablePlan } = require('./mysql-table.cjs');
 const { randomUUID } = require('node:crypto');
 const { inspectTrigger, createTriggerSQL, replaceTrigger } = require('./mysql-trigger.cjs');
@@ -49,6 +51,7 @@ let databaseBusy = false;
 const tablePlans = new Map();
 const sessions = new Map();
 let exportSnapshot;
+let activeExecution = null;
 const authentication=new WeakMap();
 const drivers={mysql:MySQLAdapter,mariadb:MySQLAdapter,clickhouse:ClickHouseAdapter,mongodb:MongoDBAdapter,postgresql:PostgreSQLAdapter,sqlserver:SQLServerAdapter,oracle:OracleAdapter};
 const entry = path.join(__dirname, 'renderer', 'index.html');
@@ -66,12 +69,12 @@ function rememberActive() {
   if (adapter) sessions.set(currentProfileId || 'local', { adapter, name: currentName, engine: currentEngine, profileId: currentProfileId, objects: cachedObjects, schemas: cachedSchemas, database: currentDatabase });
 }
 function sessionStatus(saved, key) {
-  return { name: saved.name, engine: saved.engine, profileId: saved.profileId, sessionKey: key, connected: saved.adapter.alive !== false, objects: saved.objects, schemas: saved.schemas, database: saved.database, scope: saved.adapter.scope, databaseName: saved.adapter.databaseName,profileSignature:profileSignature(saved.adapter) };
+  return { name: saved.name, engine: saved.engine, profileId: saved.profileId, sessionKey: key, connected: saved.adapter.alive !== false, queryPending:!!saved.adapter.pendingExecution, pendingRunId:saved.adapter.pendingExecution?.runId, objects: saved.objects, schemas: saved.schemas, database: saved.database, scope: saved.adapter.scope, databaseName: saved.adapter.databaseName,profileSignature:profileSignature(saved.adapter) };
 }
 function profileSignature(value){const profile=authentication.get(value)?.profile;return profile?createHash('sha256').update(JSON.stringify([profile.engine,profile.host,profile.port,profile.username,profile.database,profile.authSource,profile.tls])).digest('hex'):null;}
 function databaseStatus() {
   rememberActive();
-  return { name: currentName, engine: currentEngine, profileId: currentProfileId, sessionKey: adapter ? currentProfileId || 'local' : null, connected: !!adapter && adapter.alive !== false, objects: cachedObjects, schemas: cachedSchemas, database: currentDatabase, scope: adapter?.scope, databaseName: adapter?.databaseName,profileSignature:adapter?profileSignature(adapter):null };
+  return { name: currentName, engine: currentEngine, profileId: currentProfileId, sessionKey: adapter ? currentProfileId || 'local' : null, connected: !!adapter && adapter.alive !== false, queryPending:!!adapter?.pendingExecution, pendingRunId:adapter?.pendingExecution?.runId, objects: cachedObjects, schemas: cachedSchemas, database: currentDatabase, scope: adapter?.scope, databaseName: adapter?.databaseName,profileSignature:adapter?profileSignature(adapter):null };
 }
 function selectSession(key) {
   rememberActive();
@@ -89,8 +92,9 @@ function closeSession(key) {
   saved.adapter.close(); sessions.delete(key);
   if (adapter === saved.adapter) { adapter = null; currentName = ''; currentProfileId = null; cachedObjects = []; cachedSchemas = []; currentDatabase = ''; }
 }
-async function exclusive(action) {
+async function exclusive(action, { allowPending = false } = {}) {
   if (databaseBusy) throw new Error('Hay una operación en curso. Espera a que termine.');
+  if (!allowPending && adapter?.pendingExecution) throw new Error('La consulta anterior aún está terminando en este servidor. Puedes usar otra conexión o reintentar Detener.');
   databaseBusy = true;
   try { return await action(); } finally { databaseBusy = false; }
 }
@@ -110,6 +114,30 @@ async function activate(next, name, engine = 'sqlite', profileId = null) {
 
 if (process.platform === 'win32') app.setAppUserModelId('LQTAC.DataBase');
 app.whenReady().then(() => {
+  const settings = new SettingsStore(app.getPath('userData'));
+  const resultEdits = new ResultEdits();
+  register('results:edit-open',(token,index)=>exclusive(async()=>{if(!exportSnapshot||exportSnapshot.token!==token||exportSnapshot.session!==adapter||!Number.isInteger(index))throw new Error('El resultado ha caducado. Ejecuta de nuevo la consulta.');return resultEdits.open(exportSnapshot,index,adapter,currentEngine,currentProfileId||'local');}));
+  register('results:edit-apply',request=>exclusive(async()=>{
+    const source=adapter,engine=currentEngine,key=currentProfileId||'local',runId='data-edit:'+randomUUID(),timeoutMs=settings.get().queryTimeoutSeconds*1000;
+    const result=await resultEdits.apply(request,exportSnapshot,source,key,async(_item,write)=>executeTimed(source,engine,'Aplicar cambios de datos',timeoutMs,{openControl:controlFor(source),runId,onCancellationReleased:()=>window?.webContents.send('execution:released',{runId,key}),execute:async()=>{if(engine==='postgresql'){await source.client.query('SET statement_timeout TO '+timeoutMs);source.queryTimeoutMs=timeoutMs;}return write();}}),state=>{if(window&&!window.isDestroyed())window.webContents.send('results:edit-progress',{token:request.token,...state});});
+    return {...result,...databaseStatus()};
+  }));
+  register('settings:get', () => settings.get());
+  register('settings:save', value => settings.save(value));
+  register('database:cancel', (runId, key) => {
+    if (typeof runId !== 'string' || typeof key !== 'string') throw new Error('Identificador de ejecución no válido.');
+    const pending = sessions.get(key)?.adapter.pendingExecution;
+    if (pending && pending.runId === runId) { pending.cancel(); return true; }
+    if (!activeExecution || activeExecution.runId !== runId || activeExecution.key !== key || activeExecution.engine === 'sqlite') return false;
+    if (activeExecution.controller.signal.aborted) activeExecution.controller.signal.dispatchEvent(new Event('cancel-request'));
+    else activeExecution.controller.abort();
+    return true;
+  });
+  const controlFor = target => async () => {
+    const saved = authentication.get(target);
+    if (!saved) throw new Error('No están disponibles las credenciales de esta sesión.');
+    return drivers[saved.profile.engine].open(saved.profile, saved.password);
+  };
   const connections = new ConnectionStore(app.getPath('userData'));
   const sqlFiles=new SQLFiles(app.getPath('userData'));
   register('sql:open',async()=>{const result=await dialog.showOpenDialog(window,{title:'Abrir archivo SQL',properties:['openFile'],filters:[{name:'Consultas SQL',extensions:['sql']},{name:'Texto',extensions:['txt']}]});return result.canceled?null:sqlFiles.open(result.filePaths[0]);});
@@ -124,8 +152,8 @@ app.whenReady().then(() => {
   register('connections:create-group', (name, ids) => connections.createGroup(name, ids));
   register('connections:move', (ids, groupId) => connections.move(ids, groupId));
   register('connections:ungroup', id => connections.ungroup(id));
-  register('connections:activate', key => exclusive(async () => selectSession(key)));
-  register('connections:disconnect', key => exclusive(async () => { closeSession(key); return databaseStatus(); }));
+  register('connections:activate', key => exclusive(async () => selectSession(key), {allowPending:true}));
+  register('connections:disconnect', key => exclusive(async () => { closeSession(key); return databaseStatus(); }, {allowPending:true}));
   register('connections:remove', ids => exclusive(async () => {
     const removed = await connections.remove(ids);
     for (const id of removed) closeSession(id);
@@ -144,7 +172,7 @@ app.whenReady().then(() => {
     if (sessions.get(id)?.adapter.alive !== false && sessions.has(id)) return selectSession(id);
     const { profile, next } = await openProfile(id, password);
     return activate(next, profile.name, profile.engine, profile.id);
-  }));
+  }, {allowPending:true}));
   register('connections:test', async (id, password) => {
     const { next } = await openProfile(id, password);
     try { await next.execute(next instanceof MongoDBAdapter ? '{"ping":1}' : next instanceof OracleAdapter ? 'SELECT 1 FROM DUAL' : 'SELECT 1'); return true; } finally { next.close(); }
@@ -173,7 +201,7 @@ app.whenReady().then(() => {
   }));
   register('query:format', (source,engine) => formatQuery(source,engine));
   register('database:columns',(tables,key)=>exclusive(async()=>{if(!adapter||key!==(currentProfileId||'local'))throw new Error('La conexión de las columnas ha cambiado.');return readColumns(adapter,currentEngine,tables,cachedSchemas);}));
-  register('database:context',(key,context)=>exclusive(async()=>{if(!adapter||key!==(currentProfileId||'local'))throw new Error('La conexión de esta consulta ha cambiado.');const catalog=await restoreQueryContext(adapter,currentEngine,context,cachedSchemas);if(catalog)cachedSchemas=catalog.schemas;currentDatabase=await adapter.currentDatabase?.()||currentDatabase;cachedObjects=cachedSchemas.find(item=>item.name===currentDatabase)?.objects||[];return databaseStatus();}));
+  register('database:context',(key,context)=>exclusive(async()=>{if(!adapter||key!==(currentProfileId||'local'))throw new Error('La conexión de esta consulta ha cambiado.');if(adapter.pendingExecution)return databaseStatus();const catalog=await restoreQueryContext(adapter,currentEngine,context,cachedSchemas);if(catalog)cachedSchemas=catalog.schemas;currentDatabase=await adapter.currentDatabase?.()||currentDatabase;cachedObjects=cachedSchemas.find(item=>item.name===currentDatabase)?.objects||[];return databaseStatus();},{allowPending:true}));
   function objectTarget(target,key){
     if(!adapter||adapter.alive===false||key!==(currentProfileId||'local'))throw new Error('La conexión del objeto ha cambiado.');
     if(!target||!['view','procedure','function'].includes(target.type))throw new Error('Selecciona una vista o rutina.');
@@ -224,14 +252,16 @@ app.whenReady().then(() => {
     await fs.writeFile(selected.filePath,await exportResult(result,format));return true;
   });
   register('database:execute', (sql, expectedSession, limit=1000,context) => exclusive(async () => {
-    if(![50,100,500,1000].includes(limit))throw new Error('Selecciona un límite válido.');
+    const timeoutMs = settings.get().queryTimeoutSeconds * 1000;
+    if(![0,50,100,500,1000].includes(limit))throw new Error('Selecciona un límite válido.');
     exportSnapshot=null;
     if (!adapter) throw new Error('Abre una base de datos primero.');
     if (expectedSession && expectedSession !== (currentProfileId || 'local')) throw new Error('La conexión activa no corresponde a esta consulta. Selecciona su conexión antes de ejecutar.');
     const restored=await restoreQueryContext(adapter,currentEngine,context,cachedSchemas);if(restored)cachedSchemas=restored.schemas;
     currentDatabase=await adapter.currentDatabase?.()||currentDatabase;
-    const output = visibleResults(await adapter.execute(sql),limit);
-    const exportToken=randomUUID();exportSnapshot={token:exportToken,results:output.results};
+    const output = visibleResults(await executeTimed(adapter,currentEngine,sql,timeoutMs,{openControl:controlFor(adapter),rowLimit:limit}),limit);
+    if(output.results.length===1)decorateResult(output.results[0],{sql,engine:currentEngine,database:currentDatabase||'main',adapter});
+    const exportToken=randomUUID();exportSnapshot={token:exportToken,results:output.results,session:adapter};
     let warning;
     try {
       if (currentEngine === 'sqlite') {
@@ -250,24 +280,31 @@ app.whenReady().then(() => {
     return planExecution(source,options,currentEngine,mode);
   }));
   register('database:batch',(statements,key,limit=1000,context,runId)=>exclusive(async()=>{
+    const timeoutMs = settings.get().queryTimeoutSeconds * 1000;
     if(!adapter||key!==(currentProfileId||'local'))throw new Error('La conexión de la consulta ha cambiado.');
     if(!Array.isArray(statements)||!statements.length||statements.length>100||statements.some(sql=>typeof sql!=='string'||!sql.trim())||statements.reduce((sum,sql)=>sum+sql.length,0)>1000000)throw new Error('El lanzamiento supera 100 sentencias o un millón de caracteres.');
-    if(![50,100,500,1000].includes(limit)||typeof runId!=='string'||runId.length>100)throw new Error('Opciones de ejecución no válidas.');
+    if(![0,50,100,500,1000].includes(limit)||typeof runId!=='string'||runId.length>100)throw new Error('Opciones de ejecución no válidas.');
+    const execution = {runId,key,engine:currentEngine,controller:new AbortController()}; activeExecution = execution;
+    try {
     exportSnapshot=null;const restored=await restoreQueryContext(adapter,currentEngine,context,cachedSchemas);if(restored)cachedSchemas=restored.schemas;
-    const started=performance.now(),results=[],statementOutputs=[];let changes=0,retained=0;
+    const started=performance.now(),results=[],statementOutputs=[];let changes=0,retained=0,scopeKnown=true;
     const progress=data=>window?.webContents.send('execution:progress',{runId,...data});
     for(let index=0;index<statements.length;index++){
+      if (execution.controller.signal.aborted) break;
       const sql=statements[index],time=new Date().toISOString(),tick=performance.now();progress({index,phase:'start',sql,time});
       try{
-        const output=visibleResults(await adapter.execute(sql),limit);const size=Buffer.byteLength(JSON.stringify(output.results));
+        const output=visibleResults(await executeTimed(adapter,currentEngine,sql,timeoutMs,{rowLimit:limit,signal:execution.controller.signal,openControl:controlFor(adapter),runId,onCancellationReleased:()=>window?.webContents.send('execution:released',{runId,key})}),limit);const size=Buffer.byteLength(JSON.stringify(output.results));
+        if(output.results.length===1)decorateResult(output.results[0],{sql,engine:currentEngine,database:currentDatabase||'main',adapter,scopeKnown});
+        if(!/^\s*SELECT\b/i.test(sql))scopeKnown=false;
         if(retained+size>32000000||results.length+output.results.length>200)throw new Error('El script supera 32 MB o 200 resultados. La sentencia ya se envió al servidor; reduce los resultados antes de repetirla.');retained+=size;changes+=output.changes||0;
         if(output.results.length)output.results.forEach((result,i)=>results.push({...result,label:`Consulta ${index+1}${output.results.length>1?' · Resultado '+(i+1):''}`,statementIndex:index,sql,elapsed:output.elapsed}));
         else results.push({columns:[],values:[],label:`Consulta ${index+1}`,statementIndex:index,sql,elapsed:output.elapsed,message:`Sentencia ejecutada. ${output.changes||0} filas modificadas.`});
         const item={index,sql,time,status:'success',duration:output.elapsed,rows:output.results.reduce((sum,item)=>sum+item.values.length,0),changes:output.changes||0,truncated:output.results.some(item=>item.truncated)};statementOutputs.push(item);progress({...item,phase:'finish'});
-      }catch(error){const duration=Math.round(performance.now()-tick),item={index,sql,time,status:'error',duration,error:error.message};statementOutputs.push(item);results.push({columns:[],values:[],label:`Consulta ${index+1} · Error`,statementIndex:index,sql,elapsed:duration,error:error.message});progress({...item,phase:'finish'});break;}
+      }catch(error){const duration=Math.round(performance.now()-tick),item={index,sql,time,status:'error',duration,error:error.message,errorCode:error.code};statementOutputs.push(item);results.push({columns:[],values:[],label:`Consulta ${index+1} · Error`,statementIndex:index,sql,elapsed:duration,error:error.message,errorCode:error.code});progress({...item,phase:'finish'});break;}
     }
-    let warning;try{if(currentEngine==='sqlite'){cachedObjects=await adapter.schema();cachedSchemas=[{name:'main',objects:cachedObjects}];}else{if(adapter.catalogDirty){const catalog=await adapter.catalog();cachedSchemas=catalog.schemas;}currentDatabase=await adapter.currentDatabase();cachedObjects=cachedSchemas.find(item=>item.name===currentDatabase)?.objects||[];}}catch{warning='No se pudo actualizar el explorador tras la ejecución.';}
-    const exportToken=randomUUID();exportSnapshot={token:exportToken,results};return {results,changes,displayLimit:limit,elapsed:Math.round(performance.now()-started),statementOutputs,requestedStatements:statements.length,...databaseStatus(),warning,exportToken};
+    let warning;if(!adapter.pendingExecution&&!statementOutputs.some(item=>['QUERY_TIMEOUT','QUERY_CANCELLED'].includes(item.errorCode)))try{if(adapter.alive===false)throw new Error('Sesión cerrada');if(currentEngine==='sqlite'){cachedObjects=await adapter.schema();cachedSchemas=[{name:'main',objects:cachedObjects}];}else{if(adapter.catalogDirty){const catalog=await adapter.catalog();cachedSchemas=catalog.schemas;}currentDatabase=await adapter.currentDatabase();cachedObjects=cachedSchemas.find(item=>item.name===currentDatabase)?.objects||[];}}catch{warning='No se pudo actualizar el explorador tras la ejecución.';}
+    const exportToken=randomUUID();exportSnapshot={token:exportToken,results,session:adapter};return {results,changes,displayLimit:limit,elapsed:Math.round(performance.now()-started),statementOutputs,requestedStatements:statements.length,cancelled:execution.controller.signal.aborted,...databaseStatus(),warning,exportToken};
+    } finally { if (activeExecution === execution) activeExecution = null; }
   }));
   register('database:catalog', () => exclusive(async () => {
     if (!adapter) throw new Error('Conecta con una base de datos primero.');

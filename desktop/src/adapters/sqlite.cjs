@@ -14,7 +14,7 @@ class SQLiteAdapter {
 
   constructor(database) { this.database = database; }
 
-  execute(sql) {
+  execute(sql, { rowLimit = 1000 } = {}) {
     if (typeof sql !== 'string' || !sql.trim()) throw new Error('Escribe una consulta SQL.');
     if (sql.length > 1_000_000) throw new Error('La consulta supera el tamaño permitido.');
     const started = performance.now();
@@ -25,7 +25,7 @@ class SQLiteAdapter {
       const values = [];
       let truncated = false;
       while (statement.step()) {
-        if (values.length >= 1000) { truncated = true; break; }
+        if (rowLimit !== 0 && values.length >= rowLimit) { truncated = true; break; }
         values.push(statement.get().map(value => value instanceof Uint8Array ? `[BLOB ${value.length} bytes]` : value));
       }
       if (columns.length) results.push({ columns, values, truncated });

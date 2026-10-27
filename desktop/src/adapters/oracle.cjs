@@ -42,23 +42,28 @@ class OracleAdapter {
     return catalogFromRows([...new Set([database, ...objects.rows.map(([owner]) => owner)])], objects.rows, database);
   }
   async selectDatabase(name) { await this.connection.execute('ALTER SESSION SET CURRENT_SCHEMA = ' + identifier(name)); }
-  async execute(source) {
+  async execute(source, { timeoutMs = 30000, rowLimit = 1000, managed = false } = {}) {
     if (!this.alive) throw new Error('La sesión está cerrada. Vuelve a conectar.');
+    const previousTimeout = this.connection.callTimeout;
+    this.connection.callTimeout = managed ? 0 : timeoutMs;
     const sql = oracleStatement(source); const started = performance.now(); let result;
-    const collector = resultCollector();
+    const collector = resultCollector(rowLimit || Infinity);
     try {
       result = await this.connection.execute(sql, [], { outFormat: oracledb.OUT_FORMAT_ARRAY, resultSet: true, autoCommit: false,
         fetchTypeHandler: metadata => metadata.dbType === oracledb.DB_TYPE_NUMBER ? { type: oracledb.STRING } : undefined });
       const results = [];
       for (const set of [result.resultSet, ...(result.implicitResults || [])].filter(Boolean)) {
         const output = collector.create((set.metaData || result.metaData).map(field => field.name));
-        const rows = await set.getRows(1001);
-        for (const row of rows) collector.append(output, row);
+        let rows;
+        do {
+          rows = await set.getRows(rowLimit === 0 ? 1000 : Math.min(1000, rowLimit + 1 - output.values.length));
+          for (const row of rows) collector.append(output, row);
+        } while (rows.length && !output.truncated);
         results.push(output);
       }
       return { results, changes: result.rowsAffected || 0, elapsed: Math.round(performance.now() - started) };
     } catch (error) { if (/NJS-(003|500|501|503|510|511)|DPI-1010|ORA-0311[34]/.test(error.message)) this.close(); throw error; }
-    finally { if (result) { const closed = await Promise.allSettled([result.resultSet, ...(result.implicitResults || [])].filter(Boolean).map(set => set.close())); if (closed.some(item => item.status === 'rejected')) this.close(); } }
+    finally { if (this.alive) this.connection.callTimeout = previousTimeout; if (result) { const closed = await Promise.allSettled([result.resultSet, ...(result.implicitResults || [])].filter(Boolean).map(set => set.close())); if (closed.some(item => item.status === 'rejected')) this.close(); } }
   }
   close() { this.alive = false; this.connection.close().catch(() => {}); }
 }

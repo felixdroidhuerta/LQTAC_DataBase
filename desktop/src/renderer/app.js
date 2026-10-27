@@ -11,11 +11,17 @@ import { createObjectEditor } from './object-editor.js';
 import {initResultsGrid} from './results-grid.js';
 import {initSQLFiles} from './sql-files.js';
 import {bindQuery} from './query-binding.js';
+import {initEditorIndent} from './editor-indent.js';
+import {initSettings} from './settings.js';
+import {initSQLToolbar} from './sql-toolbar.js';
 
 const $ = selector => document.querySelector(selector);
 const api = window.lqtac;
+initEditorIndent();
+initSettings({api,notify});
 let connection = null;
 let busy = false;
+let sqlExecutionControls = null;
 let toastTimer;
 let pendingSwitch;
 let credentialProfile;
@@ -31,8 +37,8 @@ const navigator = createConnectionNavigator({ api, runTask: action => task(actio
 const autocomplete = attachAutocomplete($('#query'), $('#table-completions'), () => connection,(tables,key)=>api.columns(tables,key));
 const sqlHighlight = attachSQLHighlight($('#query'));
 const outputs = initOutputs({api,notify});
-const resultsGrid=initResultsGrid({api,notify});
-const queryTools = initQueryTools({api,getConnection:()=>connection,runSelection:()=>run(true),runTask:action=>task(action),notify,isBusy:()=>busy,getExportRows:()=>resultsGrid.exportRows()});
+const resultsGrid=initResultsGrid({api,notify,runTask:action=>task(action),onStatus:status=>updateConnection(status)});
+const queryTools = initQueryTools({api,getConnection:()=>connection,runSelection:()=>run(true),runTask:action=>task(action),notify,isBusy:()=>busy,getExportRows:()=>resultsGrid.exportRows(),hasPendingEdits:()=>resultsGrid.hasChanges()});
 const objectEditor=createObjectEditor({api,runTask:action=>task(action),getConnection:()=>connection,onChange:async()=>{autocomplete.invalidate();updateConnection(await api.catalog());},notify});
 initPanelLayout();
 const defaultSql = '-- Tu primera consulta en LQTAC Data Base\nSELECT * FROM proyectos;';
@@ -102,6 +108,7 @@ function clearResults() {
 }
 async function selectTab(id, force = false) {
   if (busy && !force) return;
+  if(id!==activeTab&&!resultsGrid.confirmDiscard())return;
   const tab = tabs.find(item => item.id === id);
   if (!tab) return;
   const navigation=++tabNavigation;
@@ -121,6 +128,7 @@ function persistClosed() {
 }
 function closeTab(id) {
   if (busy) return;
+  if(id===activeTab&&!resultsGrid.confirmDiscard())return;
   const index = tabs.findIndex(tab => tab.id === id);
   if (index < 0) return;
   const wasActive=activeTab===id;
@@ -148,6 +156,7 @@ function reopenTab() {
   tabs.push(tab); persistClosed(); persist(); selectTab(tab.id);
 }
 function newQuery(sql = connection?.engine === 'mongodb' ? '{"ping":1}' : '-- Nueva consulta\n') {
+  if(!resultsGrid.confirmDiscard())return null;
   tabNavigation++;
   const tab = { id: crypto.randomUUID(), title: `Consulta ${nextQueryNumber++}`, sql, connectionKey: connection?.sessionKey || null, connectionName: connection?.name || '', connectionEngine: connection?.engine || '' };
   if(connection?.connected)bindQuery(tab,connection);
@@ -157,6 +166,7 @@ function newQuery(sql = connection?.engine === 'mongodb' ? '{"ping":1}' : '-- Nu
   return tab;
 }
 function updateConnection(data) {
+  sqlExecutionControls?.observe(data);
   designer.setConnection(data);
   autocomplete.invalidate();
   connection = data.connected === false ? null : data;
@@ -173,13 +183,13 @@ function updateConnection(data) {
   $('#export-db').classList.toggle('hidden', remote);
   $('#disconnect-db').classList.toggle('hidden', !data.name);
   $('#execution-note').textContent = remote
-    ? 'Conexión directa al servidor. Los cambios afectan a la base real (autocommit por defecto). Ejecuta una sentencia o selección cada vez. Máximo 1.000 filas visibles; tiempo límite: 30 segundos.'
+    ? 'Conexión directa al servidor. Los cambios afectan a la base real (autocommit por defecto). Filas según el selector de resultados. El tiempo máximo por sentencia se configura en ⚙ Configuración.'
     : 'Trabajas sobre una copia en memoria. «Guardar copia» exporta el estado actual a un archivo SQLite. Los cambios se pierden al cambiar de base o cerrar la aplicación.';
-  if (data.engine === 'mongodb') $('#execution-note').textContent = 'MongoDB: un comando JSON / Extended JSON por ejecución. Ejemplo: {"find":"clientes","filter":{},"limit":100}. Admite $db para elegir la base. No ejecuta JavaScript de mongosh. Los comandos de escritura modifican el servidor. Máximo 1.000 documentos visibles.';
-  if (data.engine === 'clickhouse') $('#execution-note').textContent = 'ClickHouse vía HTTP(S): una sentencia por ejecución. Resultados JSONCompact, máximo 1.000 filas visibles. Los cambios se aplican al servidor. Usa la estrella para cambiar de base.';
-  if (data.engine === 'postgresql') $('#execution-note').textContent = 'PostgreSQL: esquemas de la base conectada; la estrella configura search_path. Autocommit salvo BEGIN explícito. Máximo 1.000 filas por resultado. Para otra base, crea otro perfil.';
-  if (data.engine === 'sqlserver') $('#execution-note').textContent = 'SQL Server: esquemas de la base conectada. Sesión persistente para transacciones y tablas temporales. Consultas con TOP; GO es un separador de cliente y no se envía al servidor. Máximo 1.000 filas por resultado.';
-  if (data.engine === 'oracle') $('#execution-note').textContent = 'Oracle Thin: esquemas del servicio conectado. DML requiere COMMIT para guardar o ROLLBACK para descartar; DDL puede confirmar implícitamente. Ejecuta una sentencia o bloque PL/SQL cada vez. Máximo 1.000 filas. La estrella cambia CURRENT_SCHEMA.';
+  if (data.engine === 'mongodb') $('#execution-note').textContent = 'MongoDB: un comando JSON / Extended JSON por ejecución. Ejemplo: {"find":"clientes","filter":{},"limit":100}. Admite $db para elegir la base. No ejecuta JavaScript de mongosh. Los comandos de escritura modifican el servidor. Filas según el selector de resultados.';
+  if (data.engine === 'clickhouse') $('#execution-note').textContent = 'ClickHouse vía HTTP(S): una sentencia por ejecución. Resultados JSONCompact; filas según el selector de resultados. Los cambios se aplican al servidor. Usa la estrella para cambiar de base.';
+  if (data.engine === 'postgresql') $('#execution-note').textContent = 'PostgreSQL: esquemas de la base conectada; la estrella configura search_path. Autocommit salvo BEGIN explícito. Filas según el selector de resultados. Para otra base, crea otro perfil.';
+  if (data.engine === 'sqlserver') $('#execution-note').textContent = 'SQL Server: esquemas de la base conectada. Sesión persistente para transacciones y tablas temporales. Consultas con TOP; GO es un separador de cliente y no se envía al servidor. Filas según el selector de resultados.';
+  if (data.engine === 'oracle') $('#execution-note').textContent = 'Oracle Thin: esquemas del servicio conectado. DML requiere COMMIT para guardar o ROLLBACK para descartar; DDL puede confirmar implícitamente. Ejecuta una sentencia o bloque PL/SQL cada vez. Filas según el selector de resultados. La estrella cambia CURRENT_SCHEMA.';
   navigator.refresh();
   renderDatabasePicker();
 }
@@ -211,6 +221,7 @@ async function connect(kind) {
   await performConnection(kind);
 }
 async function performConnection(kind) {
+  if(!resultsGrid.confirmDiscard())return;
   await task(async () => {
     const data = await api[kind]();
     if (!data) return;
@@ -224,6 +235,7 @@ async function performConnection(kind) {
 }
 async function run(selectionOnly=false,all=false) {
   if(busy)return;
+  if(!resultsGrid.confirmDiscard())return;
   const tab = tabs.find(item => item.id === activeTab);
   if (!connection && !tab?.connectionKey) { notify('Conecta con un servidor o abre una base SQLite.'); return; }
   const source=$('#query').value,start=$('#query').selectionStart,end=$('#query').selectionEnd;
@@ -239,8 +251,8 @@ async function run(selectionOnly=false,all=false) {
       return notify('El perfil asociado a esta consulta ya no existe.');
     }
   }}catch(error){notify(error.message);return;}
-    const started = performance.now(),runId=crypto.randomUUID(),records=new Map(),finished=new Set();let planned=[],unsubscribe=null;
-    function progress(item){if(item.runId&&item.runId!==runId)return;let record=records.get(item.index);if(!record){record=outputs.start({sql:item.sql,connection:tab?.connectionName||connection?.name||'',tab:tab?.title||'',time:item.time});records.set(item.index,record);}if(item.phase==='finish'){finished.add(item.index);outputs.finish(record,{status:item.status,duration:item.duration,message:item.error||`${item.rows||0} filas devueltas · ${item.changes||0} filas modificadas${item.truncated?' · Resultado limitado':''}`});}}
+    const started = performance.now(),runId=crypto.randomUUID(),records=new Map(),finished=new Set();let planned=[],unsubscribe=null,queryPending=false;
+    function progress(item){if(item.runId&&item.runId!==runId)return;if(item.phase==='cancelling'){sqlExecutionControls.cancelling(runId,item.canRetry);$('#query-info').textContent=item.message;return;}if(item.phase==='start')sqlExecutionControls.running(runId);let record=records.get(item.index);if(!record){record=outputs.start({sql:item.sql,connection:tab?.connectionName||connection?.name||'',tab:tab?.title||'',time:item.time});records.set(item.index,record);}if(item.phase==='finish'){finished.add(item.index);outputs.finish(record,{status:item.status,duration:item.duration,message:item.error||`${item.rows||0} filas devueltas · ${item.changes||0} filas modificadas${item.truncated?' · Resultado limitado':''}`});}}
     try {
     if (tab?.connectionKey) await ensureSession(tab.connectionKey);
     if (!connection) throw new Error('Conecta la sesión de esta consulta antes de ejecutar.');
@@ -248,13 +260,15 @@ async function run(selectionOnly=false,all=false) {
       const key=tab?.connectionKey||connection.sessionKey;planned=await api.planExecution(source,options,key);
       $('#query-info').textContent = `Ejecutando ${planned.length} sentencia(s)…`;
       unsubscribe=api.onExecutionProgress(progress);
+      sqlExecutionControls.prepare({runId,key,engine:connection.engine});
       const output = await api.executeBatch(planned.map(item=>item.sql),key,Number($('#result-limit').value),context,runId);
+      queryPending=output.queryPending;
       queryTools.updateResults(output);
       for(const item of output.statementOutputs)progress({...item,phase:'finish'});
       updateConnection(output);
       if (output.warning) notify(output.warning);
       resultsGrid.setOutput(output);
-      const errorIndex=output.results.findIndex(result=>result.error);if(errorIndex>=0){$('#export-result-index').value=String(errorIndex);$('#export-result-index').dispatchEvent(new Event('change'));notify('Ejecución detenida en el primer error. Los cambios anteriores no se deshacen automáticamente.');}else if(all)notify(`${output.statementOutputs.length} sentencias ejecutadas.`);
+      const errorIndex=output.results.findIndex(result=>result.error);if(errorIndex>=0){$('#export-result-index').value=String(errorIndex);$('#export-result-index').dispatchEvent(new Event('change'));const failure=output.results[errorIndex];if(failure.errorCode==='QUERY_TIMEOUT'){$('#query-info').textContent='Agotado tiempo máximo de consulta';notify('Agotado tiempo máximo de consulta');}else notify(failure.errorCode==='QUERY_CANCELLED'?failure.error:'Ejecución detenida en el primer error. Los cambios anteriores no se deshacen automáticamente.');}else if(all)notify(`${output.statementOutputs.length} sentencias ejecutadas.`);
     } catch (error) {
       if(!records.size)progress({index:0,sql:planned[0]?.sql||source.slice(start,end)||source,phase:'start'});
       for(const [index,record]of records)if(!finished.has(index))outputs.finish(record,{message:error.message,duration:Math.round(performance.now()-started),status:'error'});
@@ -262,7 +276,7 @@ async function run(selectionOnly=false,all=false) {
       $('#query-info').textContent = 'Error de consulta';
       // Earlier statements in a script may have succeeded before a SQL error.
       updateConnection(await api.status());
-    }finally{unsubscribe?.();}
+    }finally{unsubscribe?.();sqlExecutionControls.finish(runId,queryPending);}
   });
 }
 
@@ -292,7 +306,8 @@ $('#export-db').onclick = () => task(async () => {
 $('#query').value = tabs.find(tab=>tab.id===activeTab)?.sql ?? '';
 sqlHighlight.refresh();
 $('#query').addEventListener('input', () => { const tab = tabs.find(t => t.id === activeTab); if (tab) { tab.sql = $('#query').value;if(tab.sqlFileId)tab.sqlFileDirty=true;persist();renderTabs(); } });
-initSQLFiles({api,runTask:action=>task(action),getDocument:()=>tabs.find(tab=>tab.id===activeTab),onOpen:file=>{const tab=newQuery(file.sql);tab.title=file.name;tab.sqlFileId=file.id;tab.sqlFileDirty=false;persist();renderTabs();},onSaved:(id,file,sql)=>{const tab=tabs.find(tab=>tab.id===id);if(tab){tab.title=file.name;tab.sqlFileId=file.id;tab.sqlFileDirty=tab.sql!==sql;persist();renderTabs();}},notify,isBusy:()=>busy});
+initSQLFiles({api,runTask:action=>task(action),getDocument:()=>tabs.find(tab=>tab.id===activeTab),onOpen:file=>{const tab=newQuery(file.sql);if(!tab)return;tab.title=file.name;tab.sqlFileId=file.id;tab.sqlFileDirty=false;persist();renderTabs();},onSaved:(id,file,sql)=>{const tab=tabs.find(tab=>tab.id===id);if(tab){tab.title=file.name;tab.sqlFileId=file.id;tab.sqlFileDirty=tab.sql!==sql;persist();renderTabs();}},notify,isBusy:()=>busy});
+sqlExecutionControls = initSQLToolbar({api,notify});
 document.addEventListener('keydown', event => {
   if (event.defaultPrevented || document.querySelector('dialog[open]')) return;
   if(event.key==='F5'&&!$('#sql').classList.contains('hidden')){event.preventDefault();run(false,true);return;}
@@ -383,6 +398,7 @@ profileForm.onsubmit = async event => {
 };
 
 async function requestRemote(profile) {
+  if(!resultsGrid.confirmDiscard())return;
   if (busy || !profile || $('#credentials-dialog').open) return;
   if (!supportedEngines.includes(profile.engine)) return notify('Este motor todavía no tiene driver integrado.');
   try {
@@ -464,6 +480,7 @@ async function ensureSession(key) {
   updateConnection(await api.activateConnection(key));
 }
 async function activateSaved(key) {
+  if(!resultsGrid.confirmDiscard())return;
   await task(async () => {
     await ensureSession(key);
     const tab = [...tabs].reverse().find(item => item.connectionKey === key);

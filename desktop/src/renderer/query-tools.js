@@ -1,8 +1,8 @@
 const $=selector=>document.querySelector(selector);
 const node=(tag,text)=>{const value=document.createElement(tag);if(text!==undefined)value.textContent=text;return value;};
-export function initQueryTools({api,getConnection,runSelection,runTask,notify,isBusy,getExportRows}) {
+export function initQueryTools({api,getConnection,runSelection,runTask,notify,isBusy,getExportRows,hasPendingEdits}) {
   let snapshot=null; const editor=$('#query'); const index=$('#export-result-index');
-  try{const limit=Number(localStorage.getItem('lqtac.resultLimit'));if([50,100,500,1000].includes(limit))$('#result-limit').value=String(limit);}catch{}
+  try{const limit=Number(localStorage.getItem('lqtac.resultLimit') ?? 1000);if([0,50,100,500,1000].includes(limit))$('#result-limit').value=String(limit);}catch{}
   $('#result-limit').onchange=()=>{try{localStorage.setItem('lqtac.resultLimit',$('#result-limit').value);}catch{}};
   const theme=()=>$('#toggle-theme').setAttribute('aria-pressed',String(document.documentElement.dataset.theme==='dark'));theme();
   $('#toggle-theme').onclick=()=>{const next=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=next;try{localStorage.setItem('lqtac.theme',next);}catch{}theme();};
@@ -15,7 +15,8 @@ export function initQueryTools({api,getConnection,runSelection,runTask,notify,is
     // Native insertText keeps the formatting action in the editor undo history.
     if(!document.execCommand('insertText',false,formatted)){editor.setRangeText(formatted,selected?start:0,selected?end:source.length,'end');editor.dispatchEvent(new Event('input',{bubbles:true}));}
   });
-  function syncButtons(){for(const id of ['#export-csv','#export-xlsx'])$(id).disabled=isBusy()||index.value===''||!snapshot?.results?.[Number(index.value)]?.columns?.length;}
+  function syncButtons(){for(const id of ['#export-csv','#export-xlsx'])$(id).disabled=isBusy()||hasPendingEdits?.()||index.value===''||!snapshot?.results?.[Number(index.value)]?.columns?.length;}
+  document.addEventListener('lqtac:data-changed',syncButtons);
   index.addEventListener('change',syncButtons);
   for(const format of ['csv','xlsx'])$('#export-'+format).onclick=()=>runTask(async()=>{if(snapshot&&await api.exportResult(snapshot.exportToken,Number(index.value||0),format,getExportRows?.()))notify('Resultado exportado.');});
   const tooltip=node('div');tooltip.className='tool-tip hidden';tooltip.id='query-tool-tip';tooltip.setAttribute('role','tooltip');document.body.append(tooltip);

@@ -36,9 +36,10 @@ async function launch() {
   };
 }
 async function close(evaluate) {
-  const exited = new Promise(resolve => child.once('exit', resolve));
+  const closingChild = child;
+  const exited = new Promise(resolve => closingChild.once('exit', resolve));
   await Promise.race([evaluate('window.close()').catch(() => {}), exited]);
-  await Promise.race([exited, delay(5000).then(() => { if (child.exitCode === null) child.kill(); })]);
+  await Promise.race([exited, delay(5000).then(() => { if (closingChild.exitCode === null) closingChild.kill(); })]);
   socket.close();
 }
 async function run() {
@@ -50,15 +51,27 @@ async function run() {
     for (let i = 0; i < 100 && !await evaluate('document.readyState === "complete" && !!window.lqtac && document.querySelector(".brand img")?.naturalWidth > 0'); i++) await delay(100);
     assert.equal(await evaluate('document.querySelector(".brand img").naturalWidth > 0'), true);
     assert.deepEqual(await evaluate('window.lqtac.listConnections()'), []);
+    assert.equal(await evaluate('document.querySelector("#result-limit option[value=" + CSS.escape("0") + "]")?.textContent'), 'Sin límite');
+    assert.equal(await evaluate('document.querySelector(".brand-wordmark-light").naturalWidth > 0'), true);
+    assert.equal(await evaluate('document.querySelector("#stop-query")?.disabled'), true);
+    assert.equal(await evaluate('document.querySelectorAll(".editor-caption .tool-group").length'), 4);
+    assert.equal(await evaluate('document.querySelector("#edit-result-data")?.disabled'), true);
+    assert.equal(await evaluate('document.querySelector("#apply-result-data")?.disabled'), true);
+    assert.equal((await evaluate('window.lqtac.getSettings()')).queryTimeoutSeconds, 30);
+    await evaluate('window.lqtac.saveSettings({queryTimeoutSeconds:90})');
     await evaluate('window.lqtac.demo()');
     const result = await evaluate('window.lqtac.execute("SELECT 42 AS portable", "local")');
     assert.equal(result.results[0].values[0][0], 42);
+    const unlimited = await evaluate('window.lqtac.execute("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<1500) SELECT x FROM n", "local", 0)');
+    assert.equal(unlimited.results[0].values.length, 1500);
+    assert.equal(unlimited.results[0].truncated, false);
     await evaluate('localStorage.setItem("portable-smoke", "persisted")');
     await close(evaluate);
     assert.ok((await fs.readdir(data)).includes('Local Storage'));
     evaluate = await launch();
     for (let i = 0; i < 100 && !await evaluate('!!window.lqtac && document.readyState === "complete"'); i++) await delay(100);
     assert.equal(await evaluate('localStorage.getItem("portable-smoke")'), 'persisted');
+    assert.equal((await evaluate('window.lqtac.getSettings()')).queryTimeoutSeconds, 90);
     await close(evaluate);
     console.log('PASS: ejecutable autónomo, logo, dependencias SQLite/WASM, perfiles vacíos y preferencias persistentes en Data tras reiniciar');
   } finally {

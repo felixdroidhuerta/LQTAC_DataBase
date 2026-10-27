@@ -10,8 +10,8 @@ function formatQuery(source, engine) {
   return format(source,{language,tabWidth:2,keywordCase:'preserve'});
 }
 function visibleResults(output, limit = 1000) {
-  if (![50,100,500,1000].includes(limit)) throw new Error('Selecciona un límite válido.');
-  return { ...output, results: output.results.map(result=>({...result, values:result.values.slice(0,limit),truncated:result.truncated || result.values.length>limit})),displayLimit:limit };
+  if (![0,50,100,500,1000].includes(limit)) throw new Error('Selecciona un límite válido.');
+  return { ...output, results: output.results.map(result=>({...result, values:limit === 0 ? result.values : result.values.slice(0,limit),truncated:result.truncated || (limit !== 0 && result.values.length>limit)})),displayLimit:limit };
 }
 function csvField(value) {
   let text=value==null?'':String(value);

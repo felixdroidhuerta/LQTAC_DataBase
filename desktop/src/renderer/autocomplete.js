@@ -134,7 +134,7 @@ export function attachAutocomplete(editor, panel, getConnection, loadColumns) {
     const style = getComputedStyle(editor);
     const lines = editor.value.slice(0, editor.selectionStart).split('\n');
     context.font = style.font;
-    const line = lines.at(-1).replaceAll('\t', '  ');
+    const line = lines.at(-1).replaceAll('\t', '    ');
     const left = parseFloat(style.paddingLeft) + context.measureText(line).width - editor.scrollLeft;
     const top = parseFloat(style.paddingTop) + lines.length * parseFloat(style.lineHeight) - editor.scrollTop;
     panel.style.left = `${Math.max(8, Math.min(left, editor.clientWidth - Math.min(420, editor.clientWidth - 16)))}px`;

@@ -11,7 +11,7 @@ function connectionError(error) {
     ENOTFOUND: 'No se encontró el servidor. Comprueba su nombre o dirección.',
     EHOSTUNREACH: 'No hay ruta al servidor. Comprueba la red o la VPN.',
     PROTOCOL_CONNECTION_LOST: 'Se ha perdido la conexión con el servidor. Vuelve a conectar.',
-    PROTOCOL_SEQUENCE_TIMEOUT: 'La consulta superó los 30 segundos. Vuelve a conectar si la sesión se ha cerrado.'
+    PROTOCOL_SEQUENCE_TIMEOUT: 'La consulta superó el tiempo máximo configurado. Vuelve a conectar si la sesión se ha cerrado; comprueba el estado antes de repetir escrituras.'
   };
   return new Error(messages[error.code] ?? error.message ?? 'No se pudo completar la operación MySQL.');
 }
@@ -75,7 +75,7 @@ class MySQLAdapter {
     catch (error) { throw connectionError(error); }
   }
 
-  async execute(sql) {
+  async execute(sql, { timeoutMs = 30000, rowLimit = 1000, managed = false } = {}) {
     if (!this.alive) throw new Error('La sesión está cerrada. Vuelve a conectar.');
     if (typeof sql !== 'string' || !sql.trim()) throw new Error('Escribe una consulta SQL.');
     if (sql.length > 1_000_000) throw new Error('La consulta supera el tamaño permitido.');
@@ -85,15 +85,16 @@ class MySQLAdapter {
       let currentResult;
       let changes = 0;
       // Consume the full protocol response but retain at most 1,000 rows.
-      this.connection.query({ sql, timeout: 30000 })
+      this.connection.query({ sql, timeout: managed ? 0 : timeoutMs })
         .on('fields', fields => {
           currentResult = fields?.length ? { columns: fields.map(field => field.name), values: [], truncated: false } : null;
+          if(currentResult&&fields[0].orgTable&&fields.every(field=>field.schema===fields[0].schema&&field.orgTable===fields[0].orgTable&&field.orgName))currentResult.origin={schema:fields[0].schema,table:fields[0].orgTable};
           if (currentResult) results.push(currentResult);
         })
         .on('result', row => {
           if (!Array.isArray(row)) { changes = row.affectedRows ?? 0; return; }
           if (!currentResult) return;
-          if (currentResult.values.length >= 1000) { currentResult.truncated = true; return; }
+          if (rowLimit !== 0 && currentResult.values.length >= rowLimit) { currentResult.truncated = true; return; }
           currentResult.values.push(row.map(value => Buffer.isBuffer(value) ? `[BLOB ${value.length} bytes]` : value !== null && typeof value === 'object' ? JSON.stringify(value) : value));
         })
         .on('error', error => {

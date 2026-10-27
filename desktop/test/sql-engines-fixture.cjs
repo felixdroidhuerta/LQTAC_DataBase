@@ -10,7 +10,8 @@ function installDriverFixtures() {
     constructor(config) { super(); this.config = config; this.schema = 'dbo'; this.database = config.options.database || 'master'; this.queries = []; sqlConnections.push(this); }
     connect(callback) { queueMicrotask(() => callback(this.config.authentication.options.password === 'bad' ? new Error('Login failed') : undefined)); }
     execSqlBatch(request) {
-      const sql = request.sqlTextOrProcedure; this.queries.push(sql);
+      const sql = request.sqlTextOrProcedure; this.queries.push(sql); this.lastRequestTimeout = request.timeout;
+      if (/wait_forever/.test(sql)) { request.once('cancel', () => { request.callback(Object.assign(new Error('Cancelled'), { code: 'ECANCEL' })); request.emit('requestCompleted'); }); return; }
       queueMicrotask(() => {
         if (/SYNTAX_ERROR/.test(sql)) { request.callback(new Error('Incorrect syntax')); return; }
         let names = ['id', 'nombre']; let rows = [[1, 'Ana'], [2, 'Luis']];
@@ -28,9 +29,11 @@ function installDriverFixtures() {
     close() { this.closed = true; this.emit('end'); }
   }
   class FakeOracleConnection {
+    async break() { this.breakCalled = true; this.pendingReject?.(new Error('ORA-01013: user requested cancel')); this.pendingReject = null; }
     constructor(config) { this.config = config; this.schema = 'HR'; this.queries = []; this.closedSets = 0; this.pendingWrites = 0; oracleConnections.push(this); }
     async execute(sql, binds, options = {}) {
-      this.queries.push({ sql, binds, options });
+      this.queries.push({ sql, binds, options, callTimeout: this.callTimeout });
+      if (/wait_forever/.test(sql)) return new Promise((_, reject) => { this.pendingReject = reject; });
       if (/SYNTAX_ERROR/.test(sql)) throw new Error('ORA-00900: invalid SQL statement');
       if (/FROM ALL_OBJECTS/.test(sql)) return { rows: [['HR', 'CLIENTES', 'table'], ['SALES', 'ORDERS', 'table'], ['HR', 'CALC', 'function']] };
       if (/^ALTER SESSION SET CURRENT_SCHEMA/.test(sql)) { this.schema = sql.match(/= "((?:""|[^"])*)"/)[1].replaceAll('""', '"'); return {}; }
@@ -53,9 +56,11 @@ function installDriverFixtures() {
 
 async function startPostgresFixture() {
   const sockets = new Set(); const queries = [];
+  const byPid = new Map(); let nextPid = 100;
   const packet = (kind, body) => { const message = Buffer.alloc(5 + body.length); message[0] = kind.charCodeAt(0); message.writeInt32BE(body.length + 4, 1); body.copy(message, 5); return message; };
   const cstring = value => Buffer.from(value + '\0');
   const server = net.createServer(socket => {
+    const pid = nextPid++; byPid.set(pid, socket);
     sockets.add(socket); socket.on('close', () => sockets.delete(socket)); socket.on('error', () => {});
     let pending = Buffer.alloc(0); let startup = true; let schema = 'public';
     const sendRows = (names, rows) => {
@@ -75,11 +80,17 @@ async function startPostgresFixture() {
         if (pending.length < length) return;
         const message = pending.subarray(0, length); pending = pending.subarray(length);
         if (startup) {
-          startup = false; socket.write(packet('R', Buffer.alloc(4))); socket.write(packet('S', Buffer.concat([cstring('server_version'), cstring('16.0')]))); socket.write(packet('S', Buffer.concat([cstring('client_encoding'), cstring('UTF8')]))); socket.write(packet('Z', Buffer.from('I'))); continue;
+          startup = false; socket.write(packet('R', Buffer.alloc(4))); socket.write(packet('S', Buffer.concat([cstring('server_version'), cstring('16.0')]))); socket.write(packet('S', Buffer.concat([cstring('client_encoding'), cstring('UTF8')]))); const backendKey = Buffer.alloc(8); backendKey.writeInt32BE(pid, 0); backendKey.writeInt32BE(1234, 4); socket.write(packet('K', backendKey)); socket.write(packet('Z', Buffer.from('I'))); continue;
         }
         if (message[0] === 88) { socket.end(); return; }
         if (message[0] !== 81) continue;
         const sql = message.subarray(5, -1).toString(); queries.push(sql);
+        if (/^SELECT pg_cancel_backend\(\d+\)$/.test(sql)) {
+          const target = byPid.get(Number(sql.match(/\d+/)[0]));
+          if (target?.waiting) { target.waiting = false; target.write(packet('E', Buffer.from('SERROR\0C57014\0Mcanceling statement due to user request\0\0'))); target.write(packet('Z', Buffer.from('I'))); }
+          sendRows(['pg_cancel_backend'], [['t']]); socket.write(packet('Z', Buffer.from('I'))); continue;
+        }
+        if (/wait_forever/.test(sql)) { socket.waiting = true; continue; }
         if (sql === 'SELECT current_schema(), current_database()') sendRows(['current_schema', 'current_database'], [[schema, 'lqtac']]);
         else if (/SELECT nspname FROM pg_namespace/.test(sql)) sendRows(['nspname'], [['public'], ['sales']]);
         else if (/FROM pg_class/.test(sql)) sendRows(['schema', 'name', 'type', 'oid'], [['public', 'clientes', 'table', null], ['sales', 'orders', 'table', null], ['public', 'calc', 'function', '123']]);

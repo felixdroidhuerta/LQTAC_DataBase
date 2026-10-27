@@ -1,10 +1,11 @@
 const mysql = require('mysql2');
 
 // Local protocol fixture, not a SQL engine. Never contacts a real database.
-async function startMySQLFixture() {
+async function startMySQLFixture({ denyCancel = false, cancelDelayMs = 0 } = {}) {
   const sockets = new Set();
   const handshakes = [];
   const queries = [];
+  const byId = new Map(); let nextId = 1;
   let revision = 0;
   let notesColumn = false;
   let autoIncrement = 3;
@@ -17,6 +18,7 @@ async function startMySQLFixture() {
   const triggerSQL = item => `CREATE DEFINER=\`fixture\`@\`localhost\` TRIGGER \`test\`.\`${item.name}\`\n${item.timing} ${item.event} ON \`test\`.\`${item.table}\`\nFOR EACH ROW\n${item.body};`;
   const tableDDL = () => "CREATE TABLE `proyectos` (\n  `id` int unsigned NOT NULL AUTO_INCREMENT,\n  `nombre` varchar(255) NOT NULL DEFAULT '' COMMENT 'Título'" + (notesColumn ? ",\n  `notas` text NULL" : '') + " ,\n  PRIMARY KEY (`id`)\n) ENGINE=InnoDB AUTO_INCREMENT=" + autoIncrement + " DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='Proyecto " + revision + "'";
   const server = mysql.createServer(connection => {
+    const connectionId = nextId++; byId.set(connectionId, connection);
     let selectedDatabase = '';
     let sqlMode = 'STRICT_TRANS_TABLES';
     // mysql2's minimal server keeps one handshake command for all requests.
@@ -28,9 +30,9 @@ async function startMySQLFixture() {
     };
     sockets.add(connection);
     connection.on('error', () => {});
-    connection.stream.on('close', () => sockets.delete(connection));
+    connection.stream.on('close', () => { sockets.delete(connection); byId.delete(connectionId); });
     connection.serverHandshake({
-      protocolVersion: 10, serverVersion: '8.0.0-lqtac-fixture', connectionId: 1,
+      protocolVersion: 10, serverVersion: '8.0.0-lqtac-fixture', connectionId,
       statusFlags: 2, characterSet: 45,
       capabilityFlags: 0x00000200 | 0x00008000 | 0x00080000 | 0x00000008,
       authCallback: (data, callback) => {
@@ -52,6 +54,16 @@ async function startMySQLFixture() {
     });
     connection.on('query', sql => {
       queries.push(sql);
+      if (/^KILL QUERY \d+$/.test(sql)) {
+        if (denyCancel) { connection.writeError({ code: 1227, message: 'Fixture cancellation denied' }); return; }
+        const target = byId.get(Number(sql.slice(11)));
+        if (target?.pendingQuery) {
+          const token = target.pendingQuery;
+          const interrupt = () => { if (target.pendingQuery === token && !target.stream.destroyed) { target.pendingQuery = null; target.writeError({ code: 1317, message: 'Query execution was interrupted' }); } };
+          if (cancelDelayMs) setTimeout(interrupt, cancelDelayMs).unref(); else interrupt();
+        }
+        connection.writeOk({ serverStatus: 2 }); return;
+      }
       if(/^SHOW CREATE (VIEW|PROCEDURE|FUNCTION) /.test(sql)){
         const kind=/^SHOW CREATE (VIEW|PROCEDURE|FUNCTION)/.exec(sql)[1].toLowerCase();const name=/\.`([^`]+)`/.exec(sql)?.[1];const ddl=definitions.get(kind+':'+name);
         if(!ddl)connection.writeError({code:1305,message:'Object does not exist'});else if(kind==='view')result(['View','Create View','character_set_client','collation_connection'],[[name,ddl,'utf8mb4','utf8mb4_general_ci']]);else result([kind,'sql_mode','Create '+kind[0].toUpperCase()+kind.slice(1),'character_set_client','collation_connection'],[[name,'STRICT_TRANS_TABLES',ddl,'utf8mb4','utf8mb4_general_ci']]);
@@ -106,6 +118,8 @@ async function startMySQLFixture() {
       else if (sql === 'SELECT DATABASE()') result(['DATABASE()'], [[selectedDatabase || null]]);
       else if (sql.startsWith('USE ')) { selectedDatabase = sql.slice(4).replace(/^`|`$/g, '').replaceAll('``', '`'); connection.writeOk({ serverStatus: 2 }); }
       else if (sql === 'SELECT many') result(['n'], Array.from({ length: 1200 }, (_, i) => [String(i)]));
+      else if (sql === 'SELECT CONNECTION_ID()') result(['CONNECTION_ID()'], [[String(connectionId)]]);
+      else if (/^SELECT wait_forever;?$/.test(sql)) { connection.pendingQuery = {}; }
       else if (sql === 'SELECT broken') connection.writeError({ code: 1064, message: 'Fixture syntax error' });
       else if (sql === 'SELECT unicode') result(['nombre', 'vacio'], [['Diseño LQTAC', null]]);
       else if (sql.includes('DATABASE()')) result(['base_de_datos', 'version_servidor'], [[selectedDatabase || null, '8.0.0-lqtac-fixture']]);
@@ -115,6 +129,6 @@ async function startMySQLFixture() {
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const profile = { name: 'Servidor de prueba', engine: 'mysql', host: '127.0.0.1', port: server._server.address().port, username: 'fixture', database: 'test' };
-  return { profile, handshakes, queries, changeDefinition: () => { revision++; }, simulateInsert: () => { autoIncrement++; }, close: () => new Promise(resolve => { for (const socket of sockets) socket.stream.destroy(); server.close(resolve); }) };
+  return { profile, handshakes, queries, allowCancellation: () => { denyCancel = false; }, changeDefinition: () => { revision++; }, simulateInsert: () => { autoIncrement++; }, close: () => new Promise(resolve => { for (const socket of sockets) socket.stream.destroy(); server.close(resolve); }) };
 }
 module.exports = { startMySQLFixture };

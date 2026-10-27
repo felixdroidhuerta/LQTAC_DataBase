@@ -22,6 +22,7 @@ test('ClickHouse HTTP driver handles catalog, qualified SQL, output limits, DDL,
     await adapter.execute('SELECT 1'); assert.equal(fixture.queries.at(-1).database, 'analytics');
     await assert.rejects(adapter.selectDatabase('missing')); assert.equal(await adapter.currentDatabase(), 'analytics');
     await adapter.execute('USE `default`;'); assert.equal(await adapter.currentDatabase(), 'default');
+    await adapter.execute('SELECT 1', { timeoutMs: 90000 }); assert.equal(adapter.config.request_timeout, 90000); assert.equal(fixture.queries.at(-1).settings.max_execution_time, '90');
   } finally { adapter?.close(); await fixture.close(); }
 });
 
@@ -41,6 +42,7 @@ test('MongoDB actual driver handshake, catalogs, cursors, Extended JSON, writes 
     assert.equal(fixture.commands.some(command => command.killCursors), true);
     assert.equal((await adapter.execute('{"insert":"clientes","documents":[{"name":"Test"}]}')).changes, 1);
     await adapter.execute('{"aggregate":"clientes","pipeline":[]}'); assert.deepEqual(fixture.commands.at(-1).cursor, {});
+    await adapter.execute('{"find":"clientes"}', { timeoutMs: 90000 }); const timed = fixture.commands.findLast(command => command.find === 'clientes'); assert.ok(timed.maxTimeMS > 30000 && timed.maxTimeMS <= 90000);
     await assert.rejects(adapter.execute('{"badCommand":1}'), /No such command/);
     await assert.rejects(adapter.execute('db.clientes.find({})'), /JSON/);
     await assert.rejects(adapter.execute('{"$db":"bad.name","find":"clientes"}'), /base válida/);

@@ -4,10 +4,13 @@ const { BSON } = require('mongodb');
 
 async function startClickHouseFixture() {
   const queries = [];
+  const pendingQueries = new Map();
   const server = http.createServer(async (request, response) => {
     const chunks = []; for await (const chunk of request) chunks.push(chunk);
     const query = Buffer.concat(chunks).toString(); const url = new URL(request.url, 'http://localhost');
-    queries.push({ query, database: url.searchParams.get('database'), headers: request.headers });
+    queries.push({ query, database: url.searchParams.get('database'), headers: request.headers, settings: Object.fromEntries(url.searchParams) });
+    if (/wait_forever/.test(query)) { pendingQueries.set(url.searchParams.get('query_id'), response); return; }
+    if (/^KILL QUERY/.test(query)) { const id = query.match(/query_id = '([^']+)'/)?.[1]; const waiting = pendingQueries.get(id); if (waiting) { waiting.writeHead(500); waiting.end('Query was cancelled'); pendingQueries.delete(id); } response.end(); return; }
     if (url.searchParams.get('database') === 'missing') { response.writeHead(404); response.end('Unknown database'); return; }
     const send = (names, rows) => { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ meta: names.map(name => ({ name, type: 'String' })), data: rows, rows: rows.length })); };
     if (/SHOW DATABASES/i.test(query)) return send(['name'], [['default'], ['analytics']]);
@@ -23,6 +26,7 @@ async function startClickHouseFixture() {
 
 async function startMongoFixture() {
   const commands = []; const sockets = new Set(); let serial = 1;
+  const operations = new Map(); let nextOp = 100;
   const server = net.createServer(socket => {
     sockets.add(socket); socket.on('close', () => sockets.delete(socket)); socket.on('error', () => {});
     let pending = Buffer.alloc(0);
@@ -36,18 +40,19 @@ async function startMongoFixture() {
         else if (opcode === 2013) document = BSON.deserialize(message.subarray(21, 21 + message.readInt32LE(21)));
         else { socket.destroy(); return; }
         const kind = Object.keys(document)[0]; const db = document.$db || 'test'; commands.push(document);
+        const send = reply => { const bson = BSON.serialize(reply); const extra = opcode === 2004 ? 20 : 5; const output = Buffer.alloc(16 + extra + bson.length); output.writeInt32LE(output.length, 0); output.writeInt32LE(serial++, 4); output.writeInt32LE(message.readInt32LE(4), 8); output.writeInt32LE(opcode === 2004 ? 1 : 2013, 12); if (opcode === 2004) output.writeInt32LE(1, 32); bson.copy(output, 16 + extra); socket.write(output); };
         let reply = { ok: 1 };
         const cursor = (batch, collection, id = 0, next = false) => ({ ok: 1, cursor: { id: BSON.Long.fromNumber(id), ns: `${db}.${collection}`, [next ? 'nextBatch' : 'firstBatch']: batch } });
         if (['ismaster', 'isMaster', 'hello'].includes(kind)) reply = { ok: 1, isWritablePrimary: true, ismaster: true, helloOk: true, minWireVersion: 0, maxWireVersion: 25, maxBsonObjectSize: 16777216, maxMessageSizeBytes: 48000000, maxWriteBatchSize: 100000, logicalSessionTimeoutMinutes: 30, connectionId: 1 };
         else if (kind === 'listDatabases') reply = { ok: 1, databases: [{ name: 'test' }, { name: 'other' }] };
         else if (kind === 'listCollections') reply = cursor([{ name: 'clientes', type: 'collection' }, { name: 'vista', type: 'view' }], '$cmd.listCollections');
+        else if (kind === 'aggregate' && document.pipeline?.[0]?.$currentOp) { const id = document.pipeline[1].$match.$or[0]['command.comment.lqtacRequestId']; reply = cursor([...operations].filter(([,op]) => op.id === id).map(([opid]) => ({opid})), '$cmd.aggregate'); }
+        else if (kind === 'killOp') { operations.get(document.op)?.cancel(); operations.delete(document.op); }
+        else if (kind === 'find' && document.find === 'wait_forever') { operations.set(nextOp++, { id: document.comment.lqtacRequestId, cancel: () => send({ok:0,code:11601,errmsg:'Operation interrupted'}) }); continue; }
         else if (['find', 'aggregate'].includes(kind)) reply = cursor(document[kind] === 'large' ? Array.from({ length: 1002 }, (_, n) => ({ n })) : [{ _id: new BSON.ObjectId('000000000000000000000001'), name: 'Ana', score: 4 }, { name: 'Luis', extra: { flag: true } }], document[kind], document[kind] === 'large' ? 77 : 0);
         else if (kind === 'insert') reply = { ok: 1, n: 1 };
         else if (kind === 'badCommand') reply = { ok: 0, code: 59, errmsg: 'No such command' };
-        const bson = BSON.serialize(reply); const extra = opcode === 2004 ? 20 : 5;
-        const output = Buffer.alloc(16 + extra + bson.length); output.writeInt32LE(output.length, 0); output.writeInt32LE(serial++, 4); output.writeInt32LE(message.readInt32LE(4), 8); output.writeInt32LE(opcode === 2004 ? 1 : 2013, 12);
-        if (opcode === 2004) output.writeInt32LE(1, 32);
-        bson.copy(output, 16 + extra); socket.write(output);
+        send(reply);
       }
     });
   });

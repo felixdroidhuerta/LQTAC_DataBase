@@ -18,8 +18,9 @@ export function attachCellCopy(container,{api,notify,button}={}){
   function context(cell,x,y){select(cell,true);menu.hidden=false;menu.style.left=Math.max(8,Math.min(x,innerWidth-menu.offsetWidth-8))+'px';menu.style.top=Math.max(8,Math.min(y,innerHeight-menu.offsetHeight-8))+'px';menu.querySelector('button').focus();}
   container.addEventListener('click',event=>{const cell=event.target.closest('tbody td');if(cell&&container.contains(cell))select(cell,getSelection()?.isCollapsed!==false);});
   container.addEventListener('dblclick',event=>{const cell=event.target.closest('tbody td');if(cell&&container.contains(cell)){select(cell);show();}});
-  container.addEventListener('contextmenu',event=>{const cell=event.target.closest('tbody td');if(cell&&container.contains(cell)){event.preventDefault();context(cell,event.clientX,event.clientY);}});
+  container.addEventListener('contextmenu',event=>{if(event.target.closest('input,textarea,.data-fill-handle'))return;const cell=event.target.closest('tbody td');if(cell&&container.contains(cell)){event.preventDefault();context(cell,event.clientX,event.clientY);}});
   container.addEventListener('keydown',event=>{
+    if(event.target.closest('input,textarea,.data-fill-handle'))return;
     const cell=event.target.closest('tbody td');if(!cell||!container.contains(cell))return;if(selected!==cell)select(cell);
     if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='c'){if(getSelection()?.isCollapsed===false)return;event.preventDefault();event.shiftKey?copyRow():copyCell();return;}
     if(event.key==='F10'&&event.shiftKey){event.preventDefault();const r=cell.getBoundingClientRect();context(cell,r.left,r.bottom);return;}
@@ -33,5 +34,5 @@ export function attachCellCopy(container,{api,notify,button}={}){
   document.addEventListener('pointerdown',event=>{if(!menu.contains(event.target))menu.hidden=true;});window.addEventListener('resize',()=>{menu.hidden=true;});container.addEventListener('scroll',()=>{menu.hidden=true;});
   const observer=new MutationObserver(()=>{if(alive())return;selected=null;const cells=container.querySelectorAll('tbody td');for(const cell of cells){const id=identify(cell);if(key&&id.row===key.row&&id.column===key.column){select(cell);break;}}if(!selected&&cells[0])cells[0].tabIndex=0;sync();});observer.observe(container,{childList:true,subtree:true});
   document.addEventListener('lqtac:sync-copy',sync);if(button)button.onclick=copyCell;sync();
-  return {copyCell,reset(){selected=null;key=null;menu.hidden=true;for(const item of container.querySelectorAll('.cell-selected,.cell-row-selected'))item.classList.remove('cell-selected','cell-row-selected');sync();}};
+  return {copyCell,select,reset(){selected=null;key=null;menu.hidden=true;for(const item of container.querySelectorAll('.cell-selected,.cell-row-selected'))item.classList.remove('cell-selected','cell-row-selected');sync();}};
 }
