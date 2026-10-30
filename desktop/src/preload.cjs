@@ -1,5 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('lqtac', Object.freeze({
+  checkDashboardQuery: (sql,engine) => ipcRenderer.invoke('dashboards:query-check',sql,engine),
   exportDashboard: request => ipcRenderer.invoke('dashboards:export',request),
   prepareDashboardImport: () => ipcRenderer.invoke('dashboards:import-prepare'),
   finishDashboardImport: (token,options) => ipcRenderer.invoke('dashboards:import-finish',token,options),
@@ -25,6 +26,9 @@ contextBridge.exposeInMainWorld('lqtac', Object.freeze({
   saveSQL: request => ipcRenderer.invoke('sql:save',request),
   listConnections: () => ipcRenderer.invoke('connections:list'),
   saveConnection: profile => ipcRenderer.invoke('connections:save', profile),
+  forgetCredential: id => ipcRenderer.invoke('connections:forget-credential', id),
+  credentialStatus: id => ipcRenderer.invoke('connections:credential-status', id),
+  duplicateConnection: id => ipcRenderer.invoke('connections:duplicate', id),
   connectionOverview: () => ipcRenderer.invoke('connections:overview'),
   createConnectionGroup: (name, ids) => ipcRenderer.invoke('connections:create-group', name, ids),
   moveConnections: (ids, groupId) => ipcRenderer.invoke('connections:move', ids, groupId),
@@ -32,7 +36,7 @@ contextBridge.exposeInMainWorld('lqtac', Object.freeze({
   activateConnection: key => ipcRenderer.invoke('connections:activate', key),
   disconnectConnection: key => ipcRenderer.invoke('connections:disconnect', key),
   removeConnections: ids => ipcRenderer.invoke('connections:remove', ids),
-  connectProfile: (id, password) => ipcRenderer.invoke('connections:connect', id, password),
+  connectProfile: (id, password, remember) => ipcRenderer.invoke('connections:connect', id, password, remember),
   testProfile: (id, password) => ipcRenderer.invoke('connections:test', id, password),
   disconnect: () => ipcRenderer.invoke('database:disconnect'),
   catalog: () => ipcRenderer.invoke('database:catalog'),

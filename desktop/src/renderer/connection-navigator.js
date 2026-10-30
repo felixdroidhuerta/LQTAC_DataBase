@@ -3,7 +3,7 @@ const $ = selector => document.querySelector(selector);
 const el = (tag, text, className) => { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; };
 const dragType = 'application/x-lqtac-connections';
 
-export function createConnectionNavigator({ api, runTask, notify, onConnect, onDisconnect, onActivate, onDelete, onEdit, onObject, onDashboard, isBusy }) {
+export function createConnectionNavigator({ api, runTask, notify, onConnect, onDisconnect, onActivate, onDelete, onEdit, onCredentials, onObject, onDashboard, isBusy }) {
   const root = $('#explorer');
   let overview = { profiles: [], groups: [], sessions: [], activeKey: null };
   let selected = new Set(), anchor = null, filter = '', generation = 0, groupingIds = [], assignmentIds = [];
@@ -61,6 +61,9 @@ export function createConnectionNavigator({ api, runTask, notify, onConnect, onD
     if (state?.connected) actions.push({ label: 'Desconectar', action: () => onDisconnect(id) });
     if (!local) {
       actions.push({ label: 'Editar conexión', action: () => onEdit(item) });
+      actions.push({ label: 'Cambiar o recordar contraseña', disabled: !!state?.connected, action: () => onCredentials(item) });
+      actions.push({ label: 'Olvidar contraseña guardada', action: () => action(async () => { await api.forgetCredential(id); notify('Contraseña guardada eliminada.'); }) });
+      actions.push({ label: 'Duplicar conexión', action: () => action(async () => { await api.duplicateConnection(id); notify('Conexión duplicada.'); }) });
       actions.push({ label: ids.length > 1 ? 'Borrar conexiones seleccionadas' : 'Borrar', action: () => onDelete(ids) });
       actions.push({ label: 'Añadir a grupo…', action: () => assignmentDialog(ids) });
       actions.push({ label: ids.length > 1 ? 'Agrupar seleccionadas · Ctrl+Mayús+G' : 'Agrupar · Ctrl+Mayús+G', action: () => groupDialog(ids) });

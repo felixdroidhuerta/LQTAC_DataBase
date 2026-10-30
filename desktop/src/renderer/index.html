@@ -117,7 +117,7 @@
       <label>Usuario<input name="username" required maxlength="255" autocomplete="off" placeholder="Usuario del servidor"></label>
       <label id="mongo-auth-source" class="hidden">Base de autenticación (authSource)<input name="authSource" maxlength="255" placeholder="admin"></label>
       <label class="tls-option"><input type="checkbox" name="tls"> Usar TLS con certificado del servidor verificado</label>
-      <p id="engine-hint" class="profile-hint">La contraseña se solicita al conectar y no se guarda en el perfil.</p>
+      <p id="engine-hint" class="profile-hint">La contraseña se solicita al conectar y puede guardarse de forma opcional.</p>
       <p id="profile-error" role="alert"></p>
       <div class="form-actions"><button id="cancel-profile" type="button" class="secondary">Cancelar</button><button type="submit" class="primary">Guardar perfil</button></div>
     </form>
@@ -127,7 +127,7 @@
       <div class="eyebrow">AUTENTICACIÓN</div><h2 id="credentials-heading">Conectar</h2>
       <p id="credentials-target"></p>
       <label>Contraseña<input id="connection-password" type="password" maxlength="4096" autocomplete="off"></label>
-      <p class="profile-hint">Se utiliza solo para esta sesión y no se guarda en el perfil.</p>
+      <label class="tls-option"><input id="remember-password" type="checkbox"> Recordar contraseña en este equipo</label><p id="credentials-hint" class="profile-hint">La contraseña se guarda cifrada.</p>
       <p id="credentials-message" role="status" aria-live="polite"></p>
       <div class="form-actions"><button type="button" id="cancel-credentials" class="secondary">Cancelar</button><button type="button" id="test-connection" class="secondary">Probar conexión</button><button type="submit" class="primary">Conectar</button></div>
     </form>

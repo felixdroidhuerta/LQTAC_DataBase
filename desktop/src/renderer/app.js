@@ -33,7 +33,7 @@ const designer = createTableDesigner({ api, show, runTask: action => task(action
 const navigator = createConnectionNavigator({ api, runTask: action => task(action), notify, isBusy: () => busy,
   onConnect: profile => requestRemote(profile), onDisconnect: key => disconnectSaved(key), onActivate: key => activateSaved(key),
   onDashboard: scope => dashboard.open(scope).catch(error=>notify(error.message)),
-  onDelete: ids => removeSaved(ids), onEdit: profile => editProfile(profile),
+  onDelete: ids => removeSaved(ids), onEdit: profile => editProfile(profile), onCredentials: profile => openCredentials(profile).catch(error => notify(error.message)),
   onObject: (key, kind, first, second) => openConnectionObject(key, kind, first, second)
 });
 const autocomplete = attachAutocomplete($('#query'), $('#table-completions'), () => connection,(tables,key)=>api.columns(tables,key));
@@ -261,7 +261,7 @@ async function run(selectionOnly=false,all=false) {
   try{if(tab?.connectionKey&&tab.connectionKey!=='local'){
     const overview=await api.connectionOverview();
     if(!overview.sessions.some(item=>item.sessionKey===tab.connectionKey&&item.connected)){
-      const profile=overview.profiles.find(item=>item.id===tab.connectionKey);if(profile){openCredentials(profile,tab.id);notify('Reconecta el perfil de esta consulta. Después pulsa Ejecutar.');return;}
+      const profile=overview.profiles.find(item=>item.id===tab.connectionKey);if(profile){if(!await connectSavedOrPrompt(profile,tab.id))return;} else
       return notify('El perfil asociado a esta consulta ya no existe.');
     }
   }}catch(error){notify(error.message);return;}
@@ -309,7 +309,7 @@ for (const button of document.querySelectorAll('[data-view]')) button.addEventLi
 for (const id of ['#open-home', '#open-side']) $(id).onclick = () => connect('open');
 for (const id of ['#demo-home', '#demo-lab']) $(id).onclick = () => connect('demo');
 $('#cancel-switch').onclick = () => { pendingSwitch = null; $('#switch-dialog').close(); };
-$('#confirm-switch').onclick = () => { if (!pendingSwitch) return; const kind = pendingSwitch; pendingSwitch = null; $('#switch-dialog').close(); if (kind?.profile) openCredentials(kind.profile); else performConnection(kind); };
+$('#confirm-switch').onclick = () => { if (!pendingSwitch) return; const kind = pendingSwitch; pendingSwitch = null; $('#switch-dialog').close(); if (kind?.profile) requestRemote(kind.profile); else performConnection(kind); };
 $('#new-query').onclick = () => { if (!busy) newQuery(); };
 $('#run-query').onclick = ()=>run();
 const runAll=element('button','⚡','mini-tool');runAll.id='run-all';runAll.setAttribute('aria-label','Ejecutar todas las consultas');runAll.dataset.hint='Ejecutar todo · F5 · Lanza el documento en orden y se detiene en el primer error. Las escrituras anteriores no se revierten automáticamente';runAll.onclick=()=>run(false,true);$('#run-selection').after(runAll);
@@ -345,8 +345,8 @@ function updateProfileHints() {
   profileForm.elements.username.placeholder = engine === 'mongodb' ? 'Vacío para conectar sin autenticación' : engine === 'clickhouse' ? 'default' : 'Usuario del servidor';
   $('#mongo-auth-source').classList.toggle('hidden', engine !== 'mongodb');
   profileForm.elements.database.placeholder = engine === 'mongodb' ? 'test si se deja vacío' : engine === 'clickhouse' ? 'default si se deja vacío' : 'Vacío para explorar todas las bases disponibles';
-  $('#engine-hint').textContent = engine === 'clickhouse' ? 'Conexión HTTP: puerto 8123; HTTPS/TLS: normalmente 8443. No utiliza el puerto nativo 9000. La contraseña no se guarda.' : engine === 'mongodb' ? 'Conexión TCP con usuario y contraseña. authSource: admin por defecto. Introduce el host, sin mongodb://. SRV/Atlas y réplicas mediante URI quedan pendientes. La contraseña no se guarda.' : 'La contraseña se solicita al conectar y no se guarda en el perfil.';
-  if (engine === 'postgresql') { profileForm.elements.database.placeholder = 'postgres si se deja vacío'; $('#engine-hint').textContent = 'PostgreSQL con usuario/contraseña y TLS opcional. El explorador muestra los esquemas de la base conectada. La contraseña no se guarda.'; }
+  $('#engine-hint').textContent = engine === 'clickhouse' ? 'Conexión HTTP: puerto 8123; HTTPS/TLS: normalmente 8443. No utiliza el puerto nativo 9000. Puedes guardar la contraseña cifrada al conectar.' : engine === 'mongodb' ? 'Conexión TCP con usuario y contraseña. authSource: admin por defecto. Introduce el host, sin mongodb://. SRV/Atlas y réplicas mediante URI quedan pendientes. Puedes guardar la contraseña cifrada al conectar.' : 'La contraseña se solicita al conectar y puede guardarse de forma opcional.';
+  if (engine === 'postgresql') { profileForm.elements.database.placeholder = 'postgres si se deja vacío'; $('#engine-hint').textContent = 'PostgreSQL con usuario/contraseña y TLS opcional. El explorador muestra los esquemas de la base conectada. Puedes guardar la contraseña cifrada al conectar.'; }
   if (engine === 'sqlserver') $('#engine-hint').textContent = 'SQL Server por TCP y autenticación SQL (usuario/contraseña). Usa el puerto TCP de la instancia. TLS verifica el certificado. Sin base, se utiliza la predeterminada del usuario. Autenticación Windows integrada no incluida.';
   if (engine === 'oracle') { profileForm.elements.database.placeholder = 'FREEPDB1, XEPDB1 o servicio configurado'; $('#engine-hint').textContent = 'Oracle 12.1 o superior en modo Thin, sin Oracle Client. Indica SERVICE_NAME, usuario y contraseña; TLS usa TCPS. La base del perfil es el servicio, no el esquema.'; }
 }
@@ -419,13 +419,42 @@ async function requestRemote(profile) {
   try {
     const overview = await api.connectionOverview();
     if (overview.sessions.some(state => state.profileId === profile.id && state.connected)) return activateSaved(profile.id);
-    openCredentials(profile);
+    await task(() => connectSavedOrPrompt(profile));
   } catch (error) { notify(error.message); }
 }
-function openCredentials(profile,resumeTab=null) {
+async function connectSavedOrPrompt(profile, resumeTab=null) {
+  const status = await api.credentialStatus(profile.id);
+  if (status.saved) {
+    let data;
+    try { data = await api.connectProfile(profile.id, null, true); }
+    catch (error) {
+      await openCredentials(profile, resumeTab);
+      $('#credentials-message').textContent = 'No se pudo conectar con la contraseña guardada. ' + error.message;
+      return false;
+    }
+    await finishRemoteConnection(profile.id, data, resumeTab);
+    return true;
+  }
+  await openCredentials(profile, resumeTab);
+  return false;
+}
+async function finishRemoteConnection(id, data, resumeTab=null) {
+  const resume=tabs.find(tab=>tab.id===(resumeTab||activeTab)&&tab.connectionKey===id);
+  updateConnection(data);
+  $('#results').replaceChildren(element('div', 'Sesión abierta. Ejecuta una consulta para ver sus resultados.', 'result-placeholder'));
+  $('#query-info').textContent = 'Listo para ejecutar';
+  if(resume){bindQuery(resume,data);await selectTab(resume.id,true);}else newQuery(initialQuery(data.engine));
+  notify(`Conectado a ${data.name}${data.warning ? '. ' + data.warning : ''}`);
+}
+async function openCredentials(profile,resumeTab=null) {
   credentialProfile = profile;
   credentialResumeTab=resumeTab;
   $('#connection-password').value = '';
+  const status = await api.credentialStatus(profile.id);
+  $('#remember-password').checked = status.saved;
+  $('#remember-password').disabled = !status.available;
+  $('#connection-password').placeholder = status.saved ? 'Dejar vacío para usar la contraseña guardada' : '';
+  $('#credentials-hint').textContent = status.available ? 'Opcional: la contraseña se guarda cifrada con la protección de este equipo.' : 'El almacenamiento seguro no está disponible en este equipo.';
   $('#credentials-message').textContent = '';
   $('#credentials-heading').textContent = `Conectar a ${profile.name}`;
   $('#credentials-target').textContent = `${engineNames[profile.engine]} · ${profile.host}:${profile.port} · ${profile.database || 'Sin base predeterminada'} · ${profile.username}`;
@@ -440,19 +469,18 @@ async function authenticate(testOnly) {
   $('#credentials-message').textContent = testOnly ? 'Probando conexión…' : 'Conectando…';
   try {
     const id = credentialProfile.id;
+    const input = $('#connection-password').value;
+    const saved = (await api.credentialStatus(id)).saved;
+    const password = !input && saved ? null : input;
     if (testOnly) {
-      await api.testProfile(id, $('#connection-password').value);
+      await api.testProfile(id, password);
       $('#credentials-message').textContent = 'Conexión correcta. Puedes conectar con esta configuración.';
     } else {
-      const resume=tabs.find(tab=>tab.id===(credentialResumeTab||activeTab)&&tab.connectionKey===id);
-      const data = await api.connectProfile(id, $('#connection-password').value);
-      updateConnection(data);
-      $('#results').replaceChildren(element('div', 'Sesión abierta. Ejecuta una consulta para ver sus resultados.', 'result-placeholder'));
-      $('#query-info').textContent = 'Listo para ejecutar';
+      const resumeTab=credentialResumeTab;
+      const data = await api.connectProfile(id, password, $('#remember-password').checked);
       $('#connection-password').value = '';
       dialog.close(); credentialProfile = null;
-      if(resume){bindQuery(resume,data);await selectTab(resume.id,true);}else newQuery(initialQuery(data.engine));
-      notify(`Conectado a ${data.name}${data.warning ? '. ' + data.warning : ''}`);
+      await finishRemoteConnection(id, data, resumeTab);
     }
   } catch (error) { $('#credentials-message').textContent = error.message; }
   finally { busy = false; for (const button of dialog.querySelectorAll('button')) button.disabled = false;renderDatabasePicker(); }

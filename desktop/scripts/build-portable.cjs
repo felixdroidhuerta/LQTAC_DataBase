@@ -37,7 +37,8 @@ async function build() {
   await fs.copyFile(path.join(desktop, '../LICENSE.md'), path.join(application, 'LICENSE.md'));
   await fs.writeFile(path.join(directory, 'portable.json'), JSON.stringify({ application: 'LQTAC Data Base', version: manifest.version, dataDirectory: 'Data' }, null, 2));
   await fs.writeFile(path.join(directory, 'LEEME.txt'), `LQTAC Data Base ${manifest.version} - Portable Windows ${process.arch}\r\n\r\nExtrae TODO el ZIP y abre LQTAC Data Base.exe. No necesita Node.js ni instalación.\r\nLas conexiones, borradores y preferencias se guardan en Data junto al ejecutable.\r\nPara trasladarlo, cierra el programa y copia la carpeta completa, incluida Data.\r\nEl paquete se distribuye sin conexiones ni datos personales. No importa la configuración de desarrollo.\r\nLos archivos SQL externos no se trasladan automáticamente; cópialos también si los necesitas.\r\nLas VPN y permisos de acceso al servidor deben estar disponibles en el equipo de destino.\r\nPara actualizar, extrae la nueva versión en otra carpeta y copia allí tu Data con ambas aplicaciones cerradas.\r\nConserva LICENSE, LICENSES.chromium.html y las licencias de las dependencias.\r\n`);
-  await fs.copyFile(path.join(desktop, '../output/pdf', `LQTAC_DataBase_Manual_de_usuario_${manifest.version}.pdf`), path.join(directory, 'Manual-de-usuario.pdf'));
+  const manual = path.join(desktop, '../output/pdf', 'LQTAC_DataBase_Manual_de_usuario_0.2.0.pdf');
+  await fs.copyFile(manual, path.join(directory, 'Manual-de-usuario-0.2.0.pdf'));
   const archive = directory + '.zip';
   await zip(directory, archive, name);
   console.log(JSON.stringify({ directory, archive, packages }, null, 2));

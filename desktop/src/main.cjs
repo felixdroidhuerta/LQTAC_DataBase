@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, session, clipboard } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, session, clipboard, safeStorage } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 // Configure Chromium storage before ready so the entire workspace travels with the portable folder.
@@ -18,6 +18,7 @@ if (app.isPackaged && require('node:fs').existsSync(path.join(path.dirname(proce
 const { pathToFileURL } = require('node:url');
 const { SQLiteAdapter } = require('./adapters/sqlite.cjs');
 const { ConnectionStore } = require('./connections.cjs');
+const { CredentialStore } = require('./credentials.cjs');
 const { MySQLAdapter } = require('./adapters/mysql.cjs');
 const { ClickHouseAdapter } = require('./adapters/clickhouse.cjs');
 const { MongoDBAdapter } = require('./adapters/mongodb.cjs');
@@ -34,7 +35,7 @@ const {createHash}=require('node:crypto');
 const {planExecution}=require('./sql-statements.cjs');
 const {SettingsStore,executeTimed}=require('./settings.cjs');
 const {ResultEdits,decorateResult}=require('./result-edit.cjs');
-const {refreshBoard}=require('./dashboard-refresh.cjs');
+const {refreshBoard,refreshQuery}=require('./dashboard-refresh.cjs');
 const {exportPackage,parsePackage,importPackage}=require('./dashboard-transfer.cjs');
 const {QueryResponses}=require('./query-responses.cjs');
 const {DashboardStore,snapshotDatasets,DashboardQueryCache}=require('./dashboards.cjs');
@@ -133,6 +134,7 @@ app.whenReady().then(() => {
   register('dashboards:import-prepare',async()=>{const selected=await dialog.showOpenDialog(window,{title:'Importar dashboard LQTAC Data Base',properties:['openFile'],filters:[{name:'Dashboard LQTAC Data Base',extensions:['lqtac-dashboard','json']}]});if(selected.canceled)return null;const file=selected.filePaths[0];if((await fs.stat(file)).size>24000000)throw Error('El archivo supera 24 MB.');const pkg=await parsePackage(await fs.readFile(file,'utf8')),token=randomUUID();pendingDashboardImport={token,pkg,expires:Date.now()+900000};return {token,name:pkg.board.name,datasets:pkg.board.datasets.length,widgets:pkg.board.widgets.length,connections:pkg.connections};});
   register('dashboards:import-cancel',token=>{if(pendingDashboardImport?.token===token)pendingDashboardImport=null;});
   register('dashboards:import-finish',async(token,options)=>{const pending=pendingDashboardImport;if(!pending||pending.token!==token||pending.expires<Date.now())throw Error('La importación ha caducado. Selecciona el archivo de nuevo.');if(pending.processing)throw Error('Esta importación ya está en curso.');pending.processing=true;try{const board=await importPackage(pending.pkg,options,await connections.list());const saved=await dashboards.save(board);if(pendingDashboardImport===pending)pendingDashboardImport=null;return {id:saved.id,name:saved.name};}finally{pending.processing=false;}});
+  register('dashboards:query-check',(sql,engine)=>{refreshQuery(sql,engine);return true;});
   register('dashboards:list',()=>dashboards.list());
   register('dashboards:open',id=>dashboards.read(id));
   register('dashboards:save',board=>dashboards.save(board));
@@ -179,12 +181,21 @@ app.whenReady().then(() => {
     return drivers[saved.profile.engine].open(saved.profile, saved.password);
   };
   const connections = new ConnectionStore(app.getPath('userData'));
+  const credentials = new CredentialStore(app.getPath('userData'), safeStorage);
   const sqlFiles=new SQLFiles(app.getPath('userData'));
   register('sql:open',async()=>{const result=await dialog.showOpenDialog(window,{title:'Abrir archivo SQL',properties:['openFile'],filters:[{name:'Consultas SQL',extensions:['sql']},{name:'Texto',extensions:['txt']}]});return result.canceled?null:sqlFiles.open(result.filePaths[0]);});
   register('sql:save',request=>sqlFiles.save(request,async()=>{const result=await dialog.showSaveDialog(window,{title:'Guardar archivo SQL',defaultPath:'consulta.sql',filters:[{name:'Consultas SQL',extensions:['sql']}]});return result.canceled?null:result.filePath;}));
   register('clipboard:write',text=>{if(typeof text!=='string'||text.length>8000000)throw new Error('El contenido supera el límite de copia (8 millones de caracteres).');clipboard.writeText(text);return true;});
   register('connections:list', () => connections.list());
   register('connections:save', profile => connections.save(profile));
+  register('connections:forget-credential', async id => { await connections.validateIds([id]); await credentials.remove([id]); return true; });
+  register('connections:credential-status', async id => ({saved:await credentials.has(id),available:safeStorage.isEncryptionAvailable()}));
+  register('connections:duplicate', async id => {
+    const original=(await connections.list()).find(item=>item.id===id); if(!original)throw Error('No se encuentra el perfil de conexión.');
+    const duplicate=await connections.save({...original,id:undefined,name:(original.name+' (copia)').slice(0,255)});
+    try {await credentials.copy(id,duplicate.id);}catch(error){await connections.remove([duplicate.id]);throw error;}
+    const group=(await connections.groups()).find(item=>item.connectionIds.includes(id)); if(group)await connections.move([duplicate.id],group.id); return duplicate;
+  });
   register('connections:overview', async () => {
     rememberActive();
     return { profiles: await connections.list(), groups: await connections.groups(), sessions: [...sessions].map(([key, saved]) => sessionStatus(saved, key)), activeKey: adapter ? currentProfileId || 'local' : null };
@@ -196,6 +207,7 @@ app.whenReady().then(() => {
   register('connections:disconnect', key => exclusive(async () => { closeSession(key); return databaseStatus(); }, {allowPending:true}));
   register('connections:remove', ids => exclusive(async () => {
     const removed = await connections.remove(ids);
+    await credentials.remove(removed);
     for (const id of removed) closeSession(id);
     return databaseStatus();
   }));
@@ -204,13 +216,15 @@ app.whenReady().then(() => {
     if (!profile) throw new Error('No se encuentra el perfil de conexión.');
     const Driver = drivers[profile.engine];
     if (!Driver) throw new Error('Este motor todavía no tiene driver integrado.');
+    if (password === null) password = await credentials.get(id);
     if (typeof password !== 'string' || password.length > 4096) throw new Error('Contraseña no válida.');
     const next=await Driver.open(profile,password);authentication.set(next,{profile,password});return {profile,next};
   }
-  register('connections:connect', (id, password) => exclusive(async () => {
+  register('connections:connect', (id, password, remember) => exclusive(async () => {
     rememberActive();
     if (sessions.get(id)?.adapter.alive !== false && sessions.has(id)) return selectSession(id);
     const { profile, next } = await openProfile(id, password);
+    try { if (remember === true && password !== null) await credentials.set(id, password); else if (remember === false) await credentials.remove([id]); } catch (error) { next.close(); throw error; }
     return activate(next, profile.name, profile.engine, profile.id);
   }, {allowPending:true}));
   register('connections:test', async (id, password) => {

@@ -1,6 +1,6 @@
 {
   "name": "lqtac-database",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "LQTAC Data Base — espacio de trabajo modular para bases de datos",
   "main": "src/main.cjs",
@@ -35,7 +35,8 @@
     "test:query-responses": "electron test/query-responses-smoke.cjs",
     "test:dashboard-fields": "electron test/dashboard-fields-smoke.cjs",
     "test:dashboard-transfer": "electron test/dashboard-transfer-smoke.cjs",
-    "test:dashboard-functions": "electron test/dashboard-functions-smoke.cjs"
+    "test:dashboard-functions": "electron test/dashboard-functions-smoke.cjs",
+    "test:dashboard-text": "electron test/dashboard-text-smoke.cjs"
   },
   "dependencies": {
     "mysql2": "3.24.6",
