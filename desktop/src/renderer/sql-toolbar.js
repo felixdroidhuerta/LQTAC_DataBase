@@ -34,6 +34,7 @@ export function initSQLToolbar({ api, notify }) {
   groupTools(document.querySelector('.results-header .mini-tools'), [
     ['Copiar', ['#copy-result-cell']], ['Exportar', ['#export-csv', '#export-xlsx', '#export-result-index']],
     ['Filas visibles', ['.results-header label.mini-tool']],
+    ['Análisis visual', ['#create-dashboard']],
     ['Editar datos', ['#edit-result-data','#apply-result-data','#discard-result-data','#null-result-cell']]
   ]);
   return {

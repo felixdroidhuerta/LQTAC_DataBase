@@ -16,7 +16,10 @@ export function initPanelLayout() {
   };
   let saved;
   try { saved = JSON.parse(localStorage.getItem(storageKey)); } catch { /* Use defaults when storage is unavailable. */ }
-  const state = { ...defaults };
+  const state = { ...defaults, sidebarCollapsed: saved?.sidebarCollapsed === true };
+  const toggle = document.createElement("button");toggle.id="toggle-explorer";toggle.type="button";toggle.className="explorer-toggle";toggle.setAttribute("aria-controls","sidebar");
+  const identity=document.querySelector(".topbar>div:first-child");identity.classList.add("workspace-identity");identity.prepend(toggle);
+  toggle.onclick=()=>{finish(true);state.sidebarCollapsed=!state.sidebarCollapsed;apply();save();toggle.focus();};
   for (const key of Object.keys(defaults)) if (typeof saved?.[key] === 'number' && Number.isFinite(saved[key])) state[key] = saved[key];
   state.editorFraction = clamp(state.editorFraction, 0.05, 0.95);
   let drag = null;
@@ -42,9 +45,10 @@ export function initPanelLayout() {
     return editor.getBoundingClientRect().height;
   }
   function apply() {
+    root.classList.toggle("explorer-collapsed",state.sidebarCollapsed);sidebar.inert=state.sidebarCollapsed;toggle.textContent=state.sidebarCollapsed?"☷ ›":"‹ ☷";toggle.title=state.sidebarCollapsed?"Mostrar explorador":"Ocultar explorador";toggle.setAttribute("aria-label",toggle.title);toggle.setAttribute("aria-expanded",String(!state.sidebarCollapsed));
     handles.navigationHeight.classList.toggle('hidden', !workspace.open);
     for (const [key, handle] of Object.entries(handles)) {
-      if (key === 'editorFraction' && !sql.clientHeight) continue;
+      if (key === 'editorFraction' && !sql.clientHeight || key==='navigationHeight' && state.sidebarCollapsed) continue;
       const range = limits(key);
       const desired = key === 'editorFraction' ? state[key] * range.available : state[key];
       const value = Math.round(clamp(desired, range.min, range.max));

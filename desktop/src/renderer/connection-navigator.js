@@ -3,7 +3,7 @@ const $ = selector => document.querySelector(selector);
 const el = (tag, text, className) => { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; };
 const dragType = 'application/x-lqtac-connections';
 
-export function createConnectionNavigator({ api, runTask, notify, onConnect, onDisconnect, onActivate, onDelete, onEdit, onObject, isBusy }) {
+export function createConnectionNavigator({ api, runTask, notify, onConnect, onDisconnect, onActivate, onDelete, onEdit, onObject, onDashboard, isBusy }) {
   const root = $('#explorer');
   let overview = { profiles: [], groups: [], sessions: [], activeKey: null };
   let selected = new Set(), anchor = null, filter = '', generation = 0, groupingIds = [], assignmentIds = [];
@@ -57,6 +57,7 @@ export function createConnectionNavigator({ api, runTask, notify, onConnect, onD
     if (!selected.has(id)) select(id);
     const ids = savedSelection(); const item = profile(id); const state = status(id);
     const actions = [{ label: 'Conectar', action: () => state?.connected ? onActivate(id) : onConnect(item) }];
+    actions.push({label:'Dashboards',action:()=>onDashboard?.({key:id,name:item?.name||state?.name||'Laboratorio local'})});
     if (state?.connected) actions.push({ label: 'Desconectar', action: () => onDisconnect(id) });
     if (!local) {
       actions.push({ label: 'Editar conexión', action: () => onEdit(item) });

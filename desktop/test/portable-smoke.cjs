@@ -51,6 +51,10 @@ async function run() {
     for (let i = 0; i < 100 && !await evaluate('document.readyState === "complete" && !!window.lqtac && document.querySelector(".brand img")?.naturalWidth > 0'); i++) await delay(100);
     assert.equal(await evaluate('document.querySelector(".brand img").naturalWidth > 0'), true);
     assert.deepEqual(await evaluate('window.lqtac.listConnections()'), []);
+    assert.equal(await evaluate('document.querySelector("footer b").textContent'),require('../package.json').version);
+    assert.ok((await fs.stat(path.join(directory,'Manual-de-usuario.pdf'))).size>1000);
+    assert.equal(await evaluate('typeof window.lqtac.prepareDashboardImport'), 'function');
+    assert.equal(await evaluate('typeof window.lqtac.exportDashboard'), 'function');
     assert.equal(await evaluate('document.querySelector("#result-limit option[value=" + CSS.escape("0") + "]")?.textContent'), 'Sin límite');
     assert.equal(await evaluate('document.querySelector(".brand-wordmark-light").naturalWidth > 0'), true);
     assert.equal(await evaluate('document.querySelector("#stop-query")?.disabled'), true);
@@ -65,6 +69,15 @@ async function run() {
     const unlimited = await evaluate('window.lqtac.execute("WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<1500) SELECT x FROM n", "local", 0)');
     assert.equal(unlimited.results[0].values.length, 1500);
     assert.equal(unlimited.results[0].truncated, false);
+    const formula=await evaluate("(async()=>{const f=await import('./dashboard-formulas.mjs');return f.evaluateFormula(f.parseFormula('SEC_TO_TIME(TIME_TO_SEC([0])+60)',1),{row:['01:00:00']})})()");
+    assert.equal(formula,'01:01:00');
+    const token=unlimited.exportToken;
+    await evaluate('window.lqtac.rememberDashboardQuery("portable-query",'+JSON.stringify(token)+')');
+    await evaluate('window.lqtac.renameResult('+JSON.stringify(token)+',0,"Respuesta portable")');
+    await evaluate('window.lqtac.execute("SELECT 99", "local")');
+    const sources=await evaluate('window.lqtac.captureDashboardResults('+JSON.stringify(token)+',[0])');
+    assert.equal(sources[0].rows.length,1500);assert.equal(sources[0].name,'Respuesta portable');
+    await evaluate('window.lqtac.saveDashboard('+JSON.stringify({format:'LQTAC Dashboard',version:1,id:'portable-dashboard-test',revision:0,name:'Portable dashboard test',datasets:sources,widgets:[]})+')');
     await evaluate('localStorage.setItem("portable-smoke", "persisted")');
     await close(evaluate);
     assert.ok((await fs.readdir(data)).includes('Local Storage'));
@@ -72,6 +85,8 @@ async function run() {
     for (let i = 0; i < 100 && !await evaluate('!!window.lqtac && document.readyState === "complete"'); i++) await delay(100);
     assert.equal(await evaluate('localStorage.getItem("portable-smoke")'), 'persisted');
     assert.equal((await evaluate('window.lqtac.getSettings()')).queryTimeoutSeconds, 90);
+    const board=await evaluate('window.lqtac.openDashboard("portable-dashboard-test")');assert.equal(board.datasets[0].rows.length,1500);assert.equal(board.datasets[0].source.rowLimit,0);
+    assert.equal((await evaluate('window.lqtac.listConnections()')).length,0);
     await close(evaluate);
     console.log('PASS: ejecutable autónomo, logo, dependencias SQLite/WASM, perfiles vacíos y preferencias persistentes en Data tras reiniciar');
   } finally {

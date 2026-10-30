@@ -4,7 +4,7 @@ Primera aplicación Electron independiente dentro del repositorio DBeaver. El c�
 
 ## Versión portable para Windows
 
-`npm run build:portable` genera `LQTAC-DataBase-0.1.6-win-x64-portable.zip` y su carpeta extraída junto a la carpeta del proyecto, fuera de este. En este equipo se guardan directamente en `Documents`, igual que las versiones portables de LQTAC Studio. Incluye Electron y las dependencias de producción. Extrae el ZIP completo y abre `LQTAC Data Base.exe`; no requiere instalar Node.js. El empaquetado sigue la distribución manual de Electron: https://www.electronjs.org/docs/latest/tutorial/application-distribution.
+`npm run build:portable` genera `LQTAC-DataBase-0.2.0-win-x64-portable.zip` y su carpeta extraída junto a la carpeta del proyecto, fuera de este. En este equipo se guardan directamente en `Documents`, igual que las versiones portables de LQTAC Studio. Incluye Electron y las dependencias de producción. Extrae el ZIP completo y abre `LQTAC Data Base.exe`; no requiere instalar Node.js. El empaquetado sigue la distribución manual de Electron: https://www.electronjs.org/docs/latest/tutorial/application-distribution.
 
 La presencia de `portable.json` activa el almacenamiento de conexiones, borradores, preferencias, caché y copias de seguridad en `Data` junto al ejecutable. Cierra el programa antes de mover la carpeta completa. El paquete sale limpio, sin copiar conexiones ni datos personales del entorno de desarrollo. Los archivos SQL guardados fuera de esa carpeta y la configuración de VPN del sistema deben trasladarse o configurarse aparte. Para actualizar, extrae una versión nueva en otra carpeta y copia allí tu `Data`, con ambas aplicaciones cerradas. El generador rechaza sobrescribir una carpeta existente para proteger sus datos.
 
@@ -153,4 +153,112 @@ Estos adaptadores aplican el selector de filas (incluye Sin límite) y conservan
 
 ## Manual de usuario
 
-[Manual PDF 0.1.6](../output/pdf/LQTAC_DataBase_Manual_de_usuario_0.1.6.pdf), con capturas reales de demostración y práctica guiada. El portable incluye el mismo documento como `Manual-de-usuario.pdf`. Las fuentes y el generador están en `docs/manual`.
+[Manual PDF 0.2.0](../output/pdf/LQTAC_DataBase_Manual_de_usuario_0.2.0.pdf), con capturas reales de demostración y práctica guiada. El portable incluye el mismo documento como `Manual-de-usuario.pdf`. Las fuentes y el generador están en `docs/manual`.
+
+## Dashboards (primera versión)
+
+Desde **Resultados > Dashboard**, selecciona una o varias tablas de respuesta. Puedes crear un panel o añadirlas al que tengas abierto; cada fuente conserva las columnas, filas, SQL, conexión y fecha de captura. Se copian las filas cargadas completas, sin aplicar el filtro de la cuadrícula; una fuente truncada queda señalada. La captura no ejecuta SQL ni incluye credenciales.
+
+En **Dashboards** (barra izquierda y tarjeta de Inicio), configura elementos mediante **+ Elemento** o su engranaje: barras, líneas, áreas, sectores, indicador, tabla paginada y tabla resumida por grupo/serie. Elige fuente, agrupación, medida, operación, serie, columnas visibles y filtro por elemento. Las operaciones disponibles son suma, media, conteo de filas, mínimo, máximo y valores distintos (sin NULL). Los valores numéricos de alta precisión se señalan porque los gráficos usan aritmética de coma flotante; los valores originales de las tablas se conservan. Las visualizaciones presentan hasta 120 grupos, con aviso; las tablas se paginan de 50 en 50. Las categorías se muestran en el orden recibido: ordena la query para las series temporales.
+
+El filtro superior afecta a todos los elementos de la fuente seleccionada. Arrastra el tirador de la cabecera para reorganizar elementos y el de su esquina inferior derecha para cambiar ancho y alto; este último también admite flechas de teclado. El botón subir permite reorganizar sin arrastrar.
+
+**Relacionar fuentes** combina dos instantáneas mediante un campo de cada una, como una búsqueda muchos-a-uno: exige clave única en la derecha y compara tipo y valor exactos (NULL no coincide). Permite conservar todas las filas de la izquierda o solo las coincidentes. La combinación genera una tercera fuente, sin modificar los originales; hereda sus avisos de truncamiento. Las medidas de la derecha se repiten en las filas coincidentes de la izquierda, por lo que no se deben sumar totales ya agregados sin revisar el modelo. Los filtros de esa nueva fuente son independientes. Esta combinación materializa una tercera fuente; las relaciones reutilizables se gestionan desde Modelo de datos (fase 2).
+
+**Guardar dashboard** persiste diseño y datos en `dashboards/<id>.json` dentro del directorio de datos (en el portable, `Data/dashboards`). Son archivos locales sin cifrar: pueden contener datos sensibles y SQL. El selector superior permite reabrirlos sin conexión al servidor. Las escrituras son atómicas, se validan tamaños y campos y se rechazan revisiones antiguas para no sobrescribir otra ventana. Límites: 12 fuentes, 40 elementos, 200.000 filas por fuente, dos millones de celdas y 20 MB por dashboard. Un resultado demasiado grande se rechaza, sin recortarlo silenciosamente.
+
+Esta versión usa instantáneas: no vuelve a ejecutar automáticamente las consultas ni incorpora planificación, DAX, filtros cruzados por selección, exportación de dashboards o tablas dinámicas con editor de filas/columnas. Esas funciones corresponden a ampliaciones posteriores. Para incorporar datos recientes, ejecuta las consultas y añade las nuevas respuestas a un panel nuevo o al actual; no se sustituyen fuentes existentes de forma implícita.
+
+`npm run test:dashboard` verifica el flujo con SQLite de demostración: varias respuestas, gráficos, indicadores, filtro compartido, relación visual, tabla, guardado/reapertura y redimensionado nativo. `npm test` cubre además agregaciones, NULL, validación, conflictos de guardado, resultados caducados y prevención de multiplicación de filas en relaciones.
+
+### Constructor visual y explorador plegable
+
+El botón **Ocultar explorador / Mostrar explorador**, en la cabecera junto a Workspace, pliega el lateral y deja accesible la barra estrecha de navegación. Se recuerda el estado y se conserva el ancho anterior del explorador.
+
+**Visualizaciones** abre una galería lateral con miniaturas de barras, líneas, áreas, sectores, indicador, tabla y resumen. Selecciona una fuente y pulsa una miniatura o arrástrala al lienzo; al soltar sobre una tarjeta se inserta junto a ella. El nuevo elemento queda seleccionado. Pulsa una tarjeta (o enfócala y usa Enter) para editar sus propiedades en el panel, con actualización inmediata: título, tipo, fuente, eje, valor, operación y serie. Los campos se pueden arrastrar a Eje, Valor o Serie; al pulsar un campo se asigna como medida si es numérico y como eje en los demás casos. El menú **Más propiedades** conserva el formulario completo para filtros, columnas y tamaño. La galería y el panel se pueden plegar para dejar más espacio al lienzo.
+
+`npm run test:dashboard-builder` comprueba el plegado y la recuperación del explorador, persistencia tras recargar, miniaturas, creación por clic, arrastre nativo de gráfico y campo mediante Chromium, propiedades en vivo y guardado. No modifica servidores ni perfiles del usuario.
+
+### Movimiento y deselección de paneles
+
+Arrastra una tarjeta desde su cabecera o desde el fondo de su gráfico. Se muestra una guía de destino; el lienzo ajusta a una cuadrícula de doce columnas y pasos verticales de 36 píxeles. Si el panel ocupa la posición de otro, los afectados se desplazan hacia abajo para evitar solapamientos. Las posiciones horizontal y vertical, además del tamaño, se guardan con el dashboard. Los diseños anteriores se convierten a la cuadrícula conservando sus elementos. Los botones, celdas de tabla y formularios conservan su interacción habitual.
+
+Un clic en una zona vacía del dashboard o Esc deselecciona el panel y vuelve a abrir la galería. Durante un arrastre, Esc cancela el movimiento y conserva la posición anterior; puede pulsarse otra vez para deseleccionar. Las flechas mueven un panel enfocado o su tirador; Mayús amplía el paso. El botón de esquina sigue redimensionando.
+
+`npm run test:dashboard-motion` comprueba movimiento nativo en ambos ejes, guardado y reapertura de coordenadas, clic vacío, Esc y cancelación sin cambios. Las pruebas de modelo verifican la migración de diseños y la resolución de solapamientos.
+
+## Dashboard: fase 2
+
+**Modelo de datos** muestra las fuentes en tarjetas conectadas. Arrastra un campo a otro (o selecciona dos campos) para preparar una relación; también hay selectores accesibles. Antes de guardarla se muestra su cardinalidad, claves duplicadas del lado 1, NULL y filas del lado N sin correspondencia. Las relaciones activas exigen clave única en 1, comparan tipo y valor exactos y no admiten ciclos. Pueden editarse, desactivarse y quitarse. Los filtros se propagan de 1 a N, sin multiplicar filas; no se eliminan huérfanos al abrir el dashboard sin filtros. Varias rutas activas intersectan las filas permitidas. **Combinar fuentes** conserva la operación anterior que crea una tercera instantánea; es útil si necesitas campos de ambas tablas como columnas de una sola visualización. El modelo no proyecta automáticamente los campos de otras fuentes en la tabla dinámica.
+
+**Tabla dinámica** sustituye al resumen plano. Su panel ofrece zonas de **Filas, Columnas, Valores y Filtros**, con campos arrastrables y selectores con botón +. Admite hasta seis niveles de filas, tres de columnas, seis valores y seis filtros, permite cambiar el orden de la jerarquía y elegir suma, media, conteo, mínimo, máximo o distintos. El conteo de un campo excluye NULL; el conteo de filas cuenta todas. Las medidas calculadas pueden añadirse a Valores. Hay filtros «contiene» e «igual a», totales generales por filas y columnas y subtotales de la jerarquía de filas. Los totales se calculan de nuevo sobre las filas de cada grupo: las medias y los distintos no se suman. La salida se pagina y rechaza matrices de más de 50.000 celdas o 1.000 columnas, sin recorte silencioso.
+
+**ƒ Cálculos** crea y edita columnas calculadas o medidas agregadas. Las referencias `[0]`, `[1]`… identifican las columnas; sus botones las insertan en la fórmula. Las columnas se calculan por fila, por ejemplo `ROUND([3] * 1.21, 2)`. Una medida puede usar `SUM([3]) / COUNT()` y se vuelve a evaluar para cada grupo, total y filtro. Están disponibles aritmética, paréntesis, `ABS`, `ROUND`, `COALESCE`, `SUM`, `AVG`, `COUNT`, `MIN`, `MAX` y `DISTINCT`. No se admite JavaScript, SQL ni DAX. División por cero y operaciones con NULL dan NULL. La vista previa permite revisar el cálculo antes de guardarlo; los cálculos numéricos usan coma flotante. Las columnas conservan índices estables y al editar una se recalculan las que dependan de ella; solo puede referenciar columnas anteriores para evitar ciclos. Se modifican los datos locales del dashboard, sin tocar la base de origen. Las medidas se eligen con el prefijo ƒ en Valor/medida o en Valores de la tabla dinámica.
+
+El filtro superior afecta a los elementos de esa fuente y, a través de relaciones activas, a sus fuentes dependientes. Al pulsar una barra, sector o punto de una serie se filtran las otras visualizaciones por esa categoría y serie. Pulsar de nuevo la misma selección o **Quitar selección de gráfico** la limpia. Los filtros interactivos son de sesión y se reinician al reabrir; las relaciones, fórmulas, zonas de tabla dinámica y filtros de cada elemento se guardan con el dashboard. Las consultas de las fuentes se pueden actualizar manualmente o por intervalo desde la barra del dashboard.
+
+`npm run test:dashboard-analytics` comprueba el modelo con arrastre nativo de campos, cálculos, una tabla dinámica con subtotales y medias, filtros propagados y selección nativa de barras, además de guardado/reapertura sin cambios en SQLite. `npm test` verifica agregaciones, detección de ciclos, claves tipadas, fórmulas restringidas, dependencias y límites de salida.
+
+### Crear y actualizar relaciones
+
+Al abrir el modelo con relaciones existentes, el formulario carga una relación con sus campos exactos y muestra **Editando relación existente / Actualizar relación**. Guardar de nuevo conserva su identificador y no crea otra copia; se mantiene el campo seleccionado aunque no sea el primero de la fuente. **Nueva relación** limpia las fuentes y exige seleccionarlas de nuevo. Los intentos de repetir una relación o activar una segunda entre las mismas fuentes muestran el motivo concreto dentro del diálogo. La cardinalidad mostrada corresponde a los datos cargados: 1:1 es una relación válida y no un error. Después de editar el modelo, guarda el dashboard para persistirlo.
+
+`npm run test:dashboard-relationships` reproduce el caso con 16 y 7 filas, una clave en la columna 22, guardados repetidos, reapertura, activación y errores de duplicados.
+
+### Biblioteca de dashboards y nombres de consultas
+
+Abre Dashboards desde la barra lateral para listar todos los dashboards, o con botón derecho sobre una conexión → Dashboards para filtrar por ese servidor, incluso desconectado. La biblioteca muestra nombre, servidor asociado, número de fuentes e iconos de abrir/borrar, además de búsqueda por nombre y filtro por conexión. Borrar requiere confirmación y comprueba la revisión para no eliminar una versión que haya cambiado en otra ventana. No elimina consultas ni tablas del servidor. El último dashboard guardado queda disponible con Volver a edición al reiniciar. Añadir resultados propone el dashboard actual y permite elegir otro guardado o crear uno nuevo explícitamente.
+
+Doble clic o botón derecho sobre el nombre de una pestaña SQL abre el cambio de nombre. El buscador de consultas filtra las pestañas por nombre; los nombres se conservan entre sesiones y se utilizan al incorporar resultados como fuentes. Si una consulta devuelve varias tablas, se añade un número a cada fuente.
+
+Las fuentes son capturas locales de los resultados recibidos, con SQL y fecha de captura. Cerrar la pestaña SQL o desconectar el servidor no elimina una fuente guardada. El botón Actualizar fuentes vuelve a ejecutar sus consultas sin abrir pestañas SQL. Añadir nuevos resultados crea otra fuente; para sustituir datos usa Actualizar.
+
+### Actualización de fuentes
+
+Actualizar fuentes refresca todo el dashboard; el botón ↻ de cada fuente refresca esa fuente y sus combinaciones dependientes. Conserva los identificadores, nombres, elementos, relaciones, medidas y columnas calculadas (que se recalculan). Se guarda la consulta, servidor, base/esquema, contexto SQL Server y límite de filas de la captura. No crea ni necesita pestañas SQL y no modifica los resultados del editor. Las conexiones remotas utilizan sesiones separadas para no alterar transacciones o la base activa del editor; las consultas que dependan de tablas temporales o variables de otra sesión deberán convertirse en consultas independientes.
+
+Automática utiliza un intervalo de 10 a 86400 segundos, contado desde que termina la actualización anterior. Funciona mientras la aplicación permanezca abierta sobre ese dashboard, incluso al cambiar de módulo. Al cambiar de dashboard se sustituye su temporizador; no hay programación con la aplicación cerrada. Guarda el dashboard para persistir el intervalo y las nuevas capturas. Se muestra la hora prevista y la última actualización; los diálogos de edición posponen el lanzamiento.
+
+Debe estar conectada cada fuente. Se admiten consultas SELECT/WITH de lectura y comandos MongoDB find/aggregate sin etapas de escritura. Se conserva el tiempo máximo de consulta configurado. Si cualquier fuente falla, cambia sus columnas o invalida una relación, no se aplica ninguna de las nuevas capturas de ese lanzamiento. El mensaje identifica la fuente y se pausa la repetición automática hasta Actualizar manualmente o reactivar Automática. Las combinaciones creadas antes de guardar claves de unión deben recrearse una vez para poder regenerarse.
+
+### Nuevo dashboard desde consultas abiertas
+
+Nuevo dashboard abre un asistente: nombre, servidor y dos desplegables con selección múltiple (Consultas abiertas y Respuestas / fuentes). Elegir consultas muestra sus tablas de respuesta, de las que se pueden seleccionar hasta 12 fuentes. Se utiliza la última ejecución disponible de cada pestaña, aunque hayas cambiado de pestaña después. Las consultas sin resultados aparecen deshabilitadas y se indica que deben ejecutarse primero; se permite crear y guardar un dashboard vacío. Crear dashboard guarda el nuevo diseño y sus fuentes inmediatamente y abre su editor. La creación no ejecuta consultas ni abre otras pestañas SQL.
+
+El índice de resultados de consultas abiertas vive en memoria, con un máximo total de 64 MB: se descartan las ejecuciones más antiguas si se supera y se indica que deben volver a ejecutarse. Cerrar una consulta elimina su entrada de ese índice; no elimina fuentes ya guardadas en dashboards. Reiniciar la aplicación no conserva ese índice de resultados, pero sí las consultas y los dashboards guardados. La biblioteca pausa el intervalo automático del editor hasta que se vuelva a abrir su dashboard.
+
+### Pestañas de respuestas por consulta
+
+Cada ejecución numera sus salidas como Respuesta 1, Respuesta 2, etc. Botón derecho sobre una pestaña de respuesta → Renombrar permite cambiar su nombre (también Mayús+F10 sobre la pestaña). El nombre se refleja en el selector de exportación y en las fuentes disponibles para dashboards.
+
+Cada consulta abierta conserva sus últimas respuestas durante la sesión, aunque se cambie de consulta o servidor, incluso si se desconecta su conexión. Se restauran la respuesta seleccionada, filtros, ordenación, posición de desplazamiento, celda seleccionada y pestañas de resultados que se hayan cerrado. Volver a una respuesta no vuelve a ejecutar SQL. Copiar, exportar y crear fuentes de dashboard utilizan los datos originales de esa respuesta; editar requiere que siga abierta su sesión física original y conserva las comprobaciones optimistas.
+
+Ejecutar de nuevo una consulta sustituye sus respuestas. Cerrar su pestaña SQL elimina las respuestas de esa consulta; las fuentes ya guardadas en dashboards se conservan. Estas capturas de consultas no se guardan al cerrar la aplicación.
+
+### Editor visual de campos
+
+El engranaje de una tabla o gráfica abre Diseñar visualización. La lista izquierda agrupa los campos por tabla de origen y muestra nombres cortos; el buscador encuentra tanto campos como tablas. La referencia completa permanece en la fuente sin modificar los índices guardados ni los datos. En una fuente combinada pueden elegirse campos de ambos orígenes.
+
+Para una tabla, Vaciar permite empezar con pocas columnas: arrastra los campos a Columnas de la tabla, o pulsa un campo. Arrastrar una columna sobre otra cambia su orden; también hay botones de subir, bajar y quitar. Todas añade los campos de la fuente. Para una gráfica, arrastra campos a Eje / agrupación, Valor / medida y Leyenda / serie. Alternativamente, pulsa una zona y luego el campo que quieras asignarle. La operación permite sumar, contar filas, promediar, etc. Los selectores Elegir en lista permanecen disponibles como alternativa al arrastre.
+
+Vista previa muestra hasta cinco filas de una tabla o el gráfico con su configuración actual, calculado sobre la captura local. Aplicar al dashboard confirma los cambios; Cancelar los descarta. Después guarda el dashboard para conservar el diseño. En el panel lateral de una tabla, Elegir y ordenar columnas abre el mismo editor visual. Las tablas dinámicas mantienen su editor de zonas de filas, columnas, valores y filtros.
+
+### Exportar e importar dashboards entre equipos
+
+La biblioteca ofrece el icono de descarga de cada dashboard guardado. En el editor, Exportar incluye también los cambios actuales aunque todavía no se hayan guardado. Se genera un archivo .lqtac-dashboard con diseño, fuentes y filas capturadas, SQL, relaciones, combinaciones, columnas calculadas, medidas, filtros y configuración de tablas dinámicas. No incluye perfiles ni contraseñas de conexión, ni sus identificadores o firmas locales. El archivo contiene los datos y el texto de las consultas. Máximo: 24 MB por paquete; permanecen los límites normales de 12 fuentes y 40 elementos.
+
+En el otro equipo, Dashboards → Importar dashboard abre el archivo y permite elegir un nombre y asignar cada servidor original a una conexión local compatible con su motor. Se conservan las bases/esquemas y SQL guardados: la conexión elegida debe tener acceso a esa estructura. También puede elegirse Solo visualizar datos guardados; en ese caso las fuentes se mantienen expresamente sin vincular y no pueden actualizarse hasta volver a importar el archivo asignando las conexiones. No se crean perfiles, ni se solicita o guarda ninguna contraseña durante la importación.
+
+Cada importación crea una copia independiente con un identificador nuevo, sin sobrescribir dashboards existentes. La actualización automática queda desactivada y la importación no ejecuta SQL. Para refrescar los datos, conecta los perfiles asignados y utiliza Actualizar fuentes; después puede activarse el intervalo automático. Ambos equipos deben utilizar una versión de LQTAC Data Base que incorpore esta función.
+
+### Funciones MySQL en columnas y medidas del dashboard
+
+El motor local admite un subconjunto explícito de funciones con sintaxis MySQL, sin enviar SQL al servidor. Las columnas calculadas ahora conservan texto, fechas, duraciones, números, booleanos y NULL; las operaciones aritméticas convierten únicamente valores numéricos completos. Usa [n] para referenciar un campo y texto entre comillas simples (una comilla se duplica: 'O''Brien'). La ayuda Funciones disponibles y ejemplos permite buscar e insertar fórmulas. Se pueden crear columnas nuevas o editar columnas calculadas existentes; los campos originales del servidor no se modifican.
+
+Ejemplos: HOUR([1]), DATE([1]), DATE_FORMAT([1], '%Y-%m'), SEC_TO_TIME([2]), TIME_TO_SEC([3]), CONCAT([4], ' ', [5]), CONCAT_WS(' ', [4], [5]), IFNULL([4], 'Sin nombre') e IF([2] >= 60, 'Larga', 'Corta'). Las medidas aceptan composición con agregados: SEC_TO_TIME(SUM([2])) se muestra como duración en indicadores y tablas dinámicas. Para dibujar una gráfica utiliza una medida numérica (segundos), no texto de duración. Los argumentos de SUM/AVG/COUNT/MIN/MAX/DISTINCT siguen siendo referencias directas a campos; para transformar sus valores, crea primero una columna calculada.
+
+También hay YEAR, MONTH, DAY/DAYOFMONTH, MINUTE, SECOND, MICROSECOND, QUARTER, DAYOFWEEK, WEEKDAY, DAYOFYEAR, LAST_DAY, DATEDIFF, TIMEDIFF, TIME y TIME_FORMAT; UPPER/UCASE, LOWER/LCASE, TRIM/LTRIM/RTRIM, LEFT/RIGHT, SUBSTRING/SUBSTR, REPLACE, REPEAT, LOCATE/INSTR, LENGTH (bytes UTF-8) y CHAR_LENGTH/CHARACTER_LENGTH (caracteres Unicode); ABS, ROUND, TRUNCATE, CEIL/CEILING, FLOOR, SIGN, SQRT, MOD, POWER/POW, LEAST/GREATEST; COALESCE, IFNULL, NULLIF, ISNULL e IF. Se admiten comparaciones =, <>, !=, <, <=, >, >=, AND/OR/NOT e IS [NOT] NULL, además de +, -, *, /, % y paréntesis.
+
+No es un intérprete SQL completo: no acepta INTERVAL, nombres de campo sin [n], conversiones por collation del servidor ni funciones fuera del catálogo. Fechas: AAAA-MM-DD o datetime ISO con segundos y hasta seis decimales. Se usan las partes de la fecha/hora escritas, sin convertir zonas horarias; las fechas inválidas o con ceros devuelven NULL. DATE_FORMAT admite los códigos numéricos mostrados en la ayuda, sin nombres de meses/semanas ni modos WEEK. Las duraciones SEC_TO_TIME/TIMEDIFF fuera de ±838:59:59 generan un error explícito, en lugar de recortarse; TIME_FORMAT solo admite horas positivas. Los cálculos numéricos usan la precisión de JavaScript, no DECIMAL exacto. ROUND/TRUNCATE aceptan de -10 a 10 decimales.
+
+NULL se propaga en aritmética y funciones ordinarias; CONCAT devuelve NULL si un argumento es NULL, CONCAT_WS omite valores NULL, e IF/IFNULL/COALESCE evalúan solo las ramas necesarias. La división por cero devuelve NULL. Hay límites de 2000 caracteres y 512 tokens por fórmula, 32 niveles de paréntesis, 100.000 caracteres por resultado calculado y 20 MB acumulados de columnas recalculadas. Los cálculos se recomputan al actualizar las fuentes y se conservan al guardar/exportar/importar.

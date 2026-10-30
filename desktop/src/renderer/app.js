@@ -14,6 +14,7 @@ import {bindQuery} from './query-binding.js';
 import {initEditorIndent} from './editor-indent.js';
 import {initSettings} from './settings.js';
 import {initSQLToolbar} from './sql-toolbar.js';
+import {initDashboard} from './dashboard.js';
 
 const $ = selector => document.querySelector(selector);
 const api = window.lqtac;
@@ -31,6 +32,7 @@ let tabNavigation=0,tabNavigationQueue=Promise.resolve();
 const designer = createTableDesigner({ api, show, runTask: action => task(action), onStatus: status => updateConnection(status), onQuery: sql => newQuery(sql), notify });
 const navigator = createConnectionNavigator({ api, runTask: action => task(action), notify, isBusy: () => busy,
   onConnect: profile => requestRemote(profile), onDisconnect: key => disconnectSaved(key), onActivate: key => activateSaved(key),
+  onDashboard: scope => dashboard.open(scope).catch(error=>notify(error.message)),
   onDelete: ids => removeSaved(ids), onEdit: profile => editProfile(profile),
   onObject: (key, kind, first, second) => openConnectionObject(key, kind, first, second)
 });
@@ -39,6 +41,7 @@ const sqlHighlight = attachSQLHighlight($('#query'));
 const outputs = initOutputs({api,notify});
 const resultsGrid=initResultsGrid({api,notify,runTask:action=>task(action),onStatus:status=>updateConnection(status)});
 const queryTools = initQueryTools({api,getConnection:()=>connection,runSelection:()=>run(true),runTask:action=>task(action),notify,isBusy:()=>busy,getExportRows:()=>resultsGrid.exportRows(),hasPendingEdits:()=>resultsGrid.hasChanges()});
+const dashboard=initDashboard({api,notify,show,getOpenQueries:async()=>{const snapshots=await api.dashboardQueries(tabs.map(t=>t.id));return tabs.map(t=>({...t,snapshot:snapshots.find(s=>s.id===t.id)}));},getConnection:()=>connection,getResults:()=>{const result=resultsGrid.dashboardResults(),tab=tabs.find(t=>t.id===activeTab);if(result&&tab)result.results.forEach((r,i)=>r.label=tab.title+(r.customLabel?' · '+r.label:result.results.length>1?' · Respuesta '+(i+1):''));return result;}});
 const objectEditor=createObjectEditor({api,runTask:action=>task(action),getConnection:()=>connection,onChange:async()=>{autocomplete.invalidate();updateConnection(await api.catalog());},notify});
 initPanelLayout();
 const defaultSql = '-- Tu primera consulta en LQTAC Data Base\nSELECT * FROM proyectos;';
@@ -49,6 +52,7 @@ tabs.forEach((tab, index) => { if (typeof tab.title !== 'string') tab.title = `C
 let nextQueryNumber = Math.max(0, ...tabs.map(tab => Number(tab.title.match(/^Consulta (\d+)$/)?.[1]) || 0)) + 1;
 let savedActive;try{savedActive=localStorage.getItem('lqtac.activeQuery');}catch{}
 let activeTab = tabs.find(tab=>tab.id===savedActive)?.id??tabs[0]?.id??null;
+const responseViews=new Map();
 let closedTabs;
 try { closedTabs = JSON.parse(localStorage.getItem('lqtac.closedQueries')); } catch { /* Recoverable drafts are optional. */ }
 if (!Array.isArray(closedTabs)) closedTabs = [];
@@ -74,17 +78,19 @@ function show(view) {
   autocomplete.close();
   if (view === 'sql' && !tabs.length) { newQuery(); return; }
   for (const section of document.querySelectorAll('.view')) section.classList.toggle('hidden', section.id !== view);
-  for (const button of document.querySelectorAll('[data-view]')) button.classList.toggle('active', button.dataset.view === view);
-  $('#breadcrumb').textContent = { home: 'Inicio', connections: 'Conexiones', sql: 'Editor SQL', modules: 'Módulos', 'table-designer': 'Estructura de tabla' }[view];
+  for (const button of document.querySelectorAll('[data-view]')) button.classList.toggle('active', button.dataset.view === (view==='dashboard-library'?'dashboard':view));
+  $('#breadcrumb').textContent = { home: 'Inicio', connections: 'Conexiones', sql: 'Editor SQL', modules: 'Módulos', dashboard:'Dashboards', 'dashboard-library':'Biblioteca de dashboards', 'table-designer': 'Estructura de tabla' }[view];
   $('#designer-tab').classList.toggle('active', view === 'table-designer');
+  if(view==='dashboard')dashboard.activateEditor();if(view==='dashboard-library')dashboard.deactivateEditor();
   if (view === 'connections') loadProfiles();
   if (view === 'sql') { sqlHighlight.refresh(); $('#query').focus(); }
 }
+const queryFinder=element('input');queryFinder.id='query-search';queryFinder.type='search';queryFinder.placeholder='Buscar consulta…';queryFinder.setAttribute('aria-label','Buscar consultas por nombre');queryFinder.style.cssText='width:150px;min-width:100px;margin:4px;';$('#query-tabs').before(queryFinder);queryFinder.oninput=()=>renderTabs();
 function renderTabs() {
   const root = $('#query-tabs');
   root.replaceChildren();
   root.setAttribute('role', 'tablist');
-  tabs.forEach(tab => {
+  tabs.filter(tab=>!queryFinder.value||tab.title.toLocaleLowerCase().includes(queryFinder.value.toLocaleLowerCase())).forEach(tab => {
     const wrapper = element('div', undefined, `query-tab${tab.id === activeTab ? ' active' : ''}`);
     wrapper.dataset.id = tab.id;
     const button = element('button', tab.title+(tab.sqlFileDirty?' •':''), 'tab tab-select');
@@ -92,6 +98,9 @@ function renderTabs() {
     button.setAttribute('aria-controls', 'sql');
     button.title = `${tab.title} · ${tab.connectionName || 'Sin conexión asignada'}`;
     button.onclick = () => selectTab(tab.id);
+    button.ondblclick = () => renameQuery(tab);
+    button.oncontextmenu = event => {event.preventDefault();renameQuery(tab);};
+    button.title += ' · Doble clic o botón derecho para cambiar nombre';
     const close = element('button', '×', 'tab-close');
     close.title = `Cerrar ${tab.title} (Ctrl+W)`;
     close.setAttribute('aria-label', `Cerrar ${tab.title}`);
@@ -100,6 +109,11 @@ function renderTabs() {
     wrapper.append(button, close); root.append(wrapper);
   });
 }
+function renameQuery(tab){
+  if(busy)return;const dialog=element('dialog',undefined,'db-dialog'),form=element('form'),label=element('label','Nombre de la consulta'),input=element('input');input.id='query-name';input.value=tab.title;input.maxLength=160;input.required=true;label.append(input);const save=element('button','Guardar nombre','primary');save.type='submit';const cancel=element('button','Cancelar','secondary');cancel.type='button';cancel.onclick=()=>dialog.close();form.append(label,cancel,save);form.onsubmit=e=>{e.preventDefault();if(!input.value.trim())return;tab.title=input.value.trim();persist();renderTabs();dialog.close();};dialog.append(form);document.body.append(dialog);dialog.onclose=()=>dialog.remove();dialog.showModal();input.focus();input.select();
+}
+function rememberResults(){const saved=resultsGrid.snapshot();if(activeTab&&saved)responseViews.set(activeTab,saved);}
+function restoreResults(id){const saved=responseViews.get(id);if(!saved){clearResults();return;}queryTools.updateResults(saved.output);resultsGrid.setOutput(saved.output,saved);}
 function clearResults() {
   resultsGrid.clear();
   queryTools.clearResults();
@@ -112,8 +126,8 @@ async function selectTab(id, force = false) {
   const tab = tabs.find(item => item.id === id);
   if (!tab) return;
   const navigation=++tabNavigation;
-  if (activeTab !== id) clearResults();
-  activeTab = id; $('#query').value = tab.sql;persist(); renderTabs();show('sql');renderDatabasePicker();
+  const switching=activeTab!==id;if(switching)rememberResults();
+  activeTab = id; $('#query').value = tab.sql;if(switching||!resultsGrid.snapshot())restoreResults(id);persist(); renderTabs();show('sql');renderDatabasePicker();
   tabNavigationQueue=tabNavigationQueue.catch(()=>{}).then(async()=>{
     const current=()=>navigation===tabNavigation&&activeTab===id&&tabs.includes(tab);
     if(!current()||!tab.connectionKey)return;
@@ -133,7 +147,7 @@ function closeTab(id) {
   if (index < 0) return;
   const wasActive=activeTab===id;
   if(wasActive)tabNavigation++;
-  const [closed] = tabs.splice(index, 1);
+  const [closed] = tabs.splice(index, 1);responseViews.delete(closed.id);api.forgetDashboardQuery(closed.id).catch(error=>notify(error.message));
   closedTabs.push(closed); closedTabs = closedTabs.slice(-20); persistClosed();
   autocomplete.close();
   if (activeTab === id) {
@@ -157,7 +171,7 @@ function reopenTab() {
 }
 function newQuery(sql = connection?.engine === 'mongodb' ? '{"ping":1}' : '-- Nueva consulta\n') {
   if(!resultsGrid.confirmDiscard())return null;
-  tabNavigation++;
+  rememberResults();tabNavigation++;
   const tab = { id: crypto.randomUUID(), title: `Consulta ${nextQueryNumber++}`, sql, connectionKey: connection?.sessionKey || null, connectionName: connection?.name || '', connectionEngine: connection?.engine || '' };
   if(connection?.connected)bindQuery(tab,connection);
   tabs.push(tab); activeTab = tab.id;
@@ -243,7 +257,7 @@ async function run(selectionOnly=false,all=false) {
   if(selectionOnly && $('#query').selectionStart===$('#query').selectionEnd)return notify('Selecciona la subconsulta que quieres ejecutar.');
   await task(async () => {
   if(tab&&activeTab!==tab.id)return notify('La consulta activa ha cambiado. Pulsa Ejecutar de nuevo.');
-  queryTools.clearResults();resultsGrid.clear();$('#results').replaceChildren(element('div','Preparando ejecución…','result-placeholder'));$('#query-info').textContent='Preparando ejecución…';
+  if(tab)responseViews.delete(tab.id);queryTools.clearResults();resultsGrid.clear();$('#results').replaceChildren(element('div','Preparando ejecución…','result-placeholder'));$('#query-info').textContent='Preparando ejecución…';
   try{if(tab?.connectionKey&&tab.connectionKey!=='local'){
     const overview=await api.connectionOverview();
     if(!overview.sessions.some(item=>item.sessionKey===tab.connectionKey&&item.connected)){
@@ -262,6 +276,7 @@ async function run(selectionOnly=false,all=false) {
       unsubscribe=api.onExecutionProgress(progress);
       sqlExecutionControls.prepare({runId,key,engine:connection.engine});
       const output = await api.executeBatch(planned.map(item=>item.sql),key,Number($('#result-limit').value),context,runId);
+      if(tab)try{await api.rememberDashboardQuery(tab.id,output.exportToken);}catch(error){notify(error.message);}
       queryPending=output.queryPending;
       queryTools.updateResults(output);
       for(const item of output.statementOutputs)progress({...item,phase:'finish'});
@@ -283,14 +298,14 @@ async function run(selectionOnly=false,all=false) {
 for (const module of modules) {
   const card = element('button', undefined, `card${module.action ? ' available' : ''}`);
   card.append(element('span', module.icon, 'card-icon'), element('h3', module.title), element('p', module.description), element('span', module.status, 'pill'));
-  card.onclick = () => show(module.action ?? 'modules');
+  card.onclick = () => module.action==='dashboard'?dashboard.open():show(module.action ?? 'modules');
   $('#module-cards').append(card);
   const row = element('article', undefined, 'module-row');
   const copy = element('div'); copy.append(element('h3', module.title), element('p', module.description));
   row.append(element('span', module.icon, 'card-icon'), copy, element('span', module.status, 'pill'));
   $('#module-list').append(row);
 }
-for (const button of document.querySelectorAll('[data-view]')) button.addEventListener('click', () => show(button.dataset.view));
+for (const button of document.querySelectorAll('[data-view]')) button.addEventListener('click', () => {if(button.dataset.view!=='dashboard')show(button.dataset.view);});
 for (const id of ['#open-home', '#open-side']) $(id).onclick = () => connect('open');
 for (const id of ['#demo-home', '#demo-lab']) $(id).onclick = () => connect('demo');
 $('#cancel-switch').onclick = () => { pendingSwitch = null; $('#switch-dialog').close(); };

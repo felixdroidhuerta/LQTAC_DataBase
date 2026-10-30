@@ -60,7 +60,7 @@ app.whenReady().then(async () => {
     await js('document.querySelector(".profile-row .primary").click()');
     await until('document.querySelector("#connection-label").textContent === "Timeout fixture" && !document.querySelector("#run-query").disabled');
     assert.equal(await js('document.querySelectorAll(".editor-caption .tool-separator").length'), 3);
-    assert.equal(await js('document.querySelectorAll(".results-header .tool-separator").length'), 3);
+    assert.equal(await js('document.querySelectorAll(".results-header .tool-separator").length'), 4);
     await js(`(()=>{const editor=document.querySelector('#query');editor.value=${JSON.stringify('SELECT wait_forever;\nUPDATE must_not_run;')};editor.setSelectionRange(0,0);editor.dispatchEvent(new Event('input'));document.querySelector('#run-all').click()})()`);
     await until('!document.querySelector("#stop-query").disabled');
     const stopColor = await js('getComputedStyle(document.querySelector("#stop-query")).backgroundColor'); const channels = stopColor.match(/\d+/g).map(Number); assert.ok(channels[0] > channels[1] * 1.5 && channels[0] > channels[2] * 1.5, 'El botón activo debe tener fondo rojo');

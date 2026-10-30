@@ -11,6 +11,8 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.platypus import Paragraph, Table, TableStyle
 from reportlab.lib.utils import ImageReader
 from content import PAGES
+from dashboard_content import DASHBOARD_PAGES
+PAGES = PAGES + DASHBOARD_PAGES
 
 ROOT=Path(__file__).resolve().parents[2]
 ASSETS=Path(__file__).parent/'assets'
@@ -76,8 +78,8 @@ c.setFillColor(HexColor('#79e5f5'));c.setFont('SegoeB',9);c.drawString(LEFT,667,
 para('Manual de usuario',LEFT,609,WIDTH,ParagraphStyle('cover',parent=TITLE,fontSize=35,leading=41,textColor=HexColor('#111111')))
 para('Conectar, consultar y trabajar con tus datos.',LEFT,548,WIDTH,LEAD)
 y=image('03-consultas.png',505,max_h=335)
-para('Conexiones · SQL · Resultados · Edición · Configuración',LEFT,y-13,WIDTH,HEAD)
-para('Actualizado · 28 de octubre de 2026\nCapturas reales con datos ficticios y SQLite local.\nEdición '+VERSION+' con las mejoras del 28 de octubre de 2026.',LEFT,108,WIDTH,CAP)
+para('Conexiones · SQL · Resultados · Dashboards',LEFT,y-13,WIDTH,HEAD)
+para('Actualizado · 29 de octubre de 2026\nCapturas reales con datos ficticios y SQLite local.\nEdición '+VERSION+' con las mejoras del 29 de octubre de 2026.',LEFT,108,WIDTH,CAP)
 footer(1);c.showPage()
 
 # Two-column, linked contents.
@@ -126,12 +128,12 @@ for i,p in enumerate(PAGES):
     if y<BOTTOM:raise RuntimeError(f'Page {number} overflow: bottom {y:.1f} / {p["title"]}')
     footer(number);c.showPage()
 c.save()
-md=['# LQTAC Data Base '+VERSION+' - Manual de usuario','','Actualizado: 28 de octubre de 2026.','Capturas reales con datos ficticios y SQLite local.']
+md=['# LQTAC Data Base '+VERSION+' - Manual de usuario','','Actualizado: 29 de octubre de 2026.','Capturas reales con datos ficticios y SQLite local.']
 for p in PAGES:
     md.extend(['','## '+p['title'],'',p['lead']])
     if p.get('image'):md.extend(['','![Captura de '+p['title']+'](assets/'+p['image']+')','',p['caption']])
     if p.get('table'):md.extend(['','| '+p['table'][0][0]+' | '+p['table'][0][1]+' |','| --- | --- |']+['| '+a+' | '+b+' |' for a,b in p['table'][1:]])
     for title,text in p.get('blocks',[]):md.extend(['','### '+title,'',text])
-(Path(__file__).parent/'Manual_de_usuario.md').write_text('\n'.join(md)+'\n',encoding='utf-8')
+(Path(__file__).parent/'Manual_de_usuario.md').write_text('\n'.join(md)+'\n',encoding='utf-8',newline='\n')
 print(f'PDF: {OUT}\nPages: {TOTAL}')
 for row in checks:print(row)

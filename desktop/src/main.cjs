@@ -34,6 +34,10 @@ const {createHash}=require('node:crypto');
 const {planExecution}=require('./sql-statements.cjs');
 const {SettingsStore,executeTimed}=require('./settings.cjs');
 const {ResultEdits,decorateResult}=require('./result-edit.cjs');
+const {refreshBoard}=require('./dashboard-refresh.cjs');
+const {exportPackage,parsePackage,importPackage}=require('./dashboard-transfer.cjs');
+const {QueryResponses}=require('./query-responses.cjs');
+const {DashboardStore,snapshotDatasets,DashboardQueryCache}=require('./dashboards.cjs');
 const { inspectTable, buildTablePlan } = require('./mysql-table.cjs');
 const { randomUUID } = require('node:crypto');
 const { inspectTrigger, createTriggerSQL, replaceTrigger } = require('./mysql-trigger.cjs');
@@ -115,11 +119,47 @@ async function activate(next, name, engine = 'sqlite', profileId = null) {
 if (process.platform === 'win32') app.setAppUserModelId('LQTAC.DataBase');
 app.whenReady().then(() => {
   const settings = new SettingsStore(app.getPath('userData'));
+  const dashboards = new DashboardStore(app.getPath('userData'));
+  const dashboardQueries=new DashboardQueryCache(),queryResponses=new QueryResponses();
+  const snapshotFor=token=>queryResponses.find(token)||(exportSnapshot?.token===token?exportSnapshot:null);
+  register('results:rename',(token,index,name)=>{const snapshot=snapshotFor(token);if(!snapshot?.results[index]||!Number.isInteger(index)||typeof name!=='string'||!name.trim()||name.length>160)throw Error('El nombre de la respuesta no es válido.');const label=name.trim();snapshot.results[index].label=label;snapshot.results[index].customLabel=true;for(const {snapshot:cached}of dashboardQueries.entries.values())if(cached.token===token&&cached.results[index]){cached.results[index].label=label;cached.results[index].customLabel=true;}return label;});
+  register('dashboards:delete',(id,revision)=>dashboards.remove(id,revision));
+  register('dashboards:query-remember',(id,token)=>{if(!exportSnapshot||exportSnapshot.token!==token)throw Error('Los resultados han caducado.');queryResponses.remember(id,exportSnapshot);dashboardQueries.remember(id,exportSnapshot);});
+  register('dashboards:query-forget',id=>{dashboardQueries.forget(id);const removed=queryResponses.forget(id);if(removed===exportSnapshot)exportSnapshot=null;for(const [token,item]of resultEdits.sessions)if(item.snapshot===removed)resultEdits.sessions.delete(token);});
+  register('dashboards:queries',ids=>dashboardQueries.list(ids));
+  register('dashboards:query-capture',requests=>dashboardQueries.capture(requests));
+  let pendingDashboardImport=null;
+  register('dashboards:export',async request=>{const board=request?.id?await dashboards.read(request.id):request?.board;const pkg=await exportPackage(board,app.getVersion());const name='LQTAC-'+pkg.board.name.replace(/[<>:"/\\|?*\x00-\x1f]/g,'_')+'.lqtac-dashboard';const selected=await dialog.showSaveDialog(window,{title:'Exportar dashboard con sus datos y consultas',defaultPath:name,filters:[{name:'Dashboard LQTAC Data Base',extensions:['lqtac-dashboard']}]});if(selected.canceled)return null;await fs.writeFile(selected.filePath,JSON.stringify(pkg),{encoding:'utf8',mode:0o600});return {name:path.basename(selected.filePath)};});
+  register('dashboards:import-prepare',async()=>{const selected=await dialog.showOpenDialog(window,{title:'Importar dashboard LQTAC Data Base',properties:['openFile'],filters:[{name:'Dashboard LQTAC Data Base',extensions:['lqtac-dashboard','json']}]});if(selected.canceled)return null;const file=selected.filePaths[0];if((await fs.stat(file)).size>24000000)throw Error('El archivo supera 24 MB.');const pkg=await parsePackage(await fs.readFile(file,'utf8')),token=randomUUID();pendingDashboardImport={token,pkg,expires:Date.now()+900000};return {token,name:pkg.board.name,datasets:pkg.board.datasets.length,widgets:pkg.board.widgets.length,connections:pkg.connections};});
+  register('dashboards:import-cancel',token=>{if(pendingDashboardImport?.token===token)pendingDashboardImport=null;});
+  register('dashboards:import-finish',async(token,options)=>{const pending=pendingDashboardImport;if(!pending||pending.token!==token||pending.expires<Date.now())throw Error('La importación ha caducado. Selecciona el archivo de nuevo.');if(pending.processing)throw Error('Esta importación ya está en curso.');pending.processing=true;try{const board=await importPackage(pending.pkg,options,await connections.list());const saved=await dashboards.save(board);if(pendingDashboardImport===pending)pendingDashboardImport=null;return {id:saved.id,name:saved.name};}finally{pending.processing=false;}});
+  register('dashboards:list',()=>dashboards.list());
+  register('dashboards:open',id=>dashboards.read(id));
+  register('dashboards:save',board=>dashboards.save(board));
+  register('dashboards:refresh',(board,ids)=>exclusive(async()=>{
+    rememberActive();return refreshBoard(board,ids,async source=>{
+      if(source.transferUnmapped)throw Error('Esta fuente importada no tiene un servidor local asociado. Importa el dashboard eligiendo su conexión para actualizarla.');
+      const candidates=[...sessions.entries()].filter(([,session])=>session.name===source.connection&&session.engine===source.engine);const key=source.connectionKey|| (candidates.length===1?candidates[0][0]:null);const saved=sessions.get(key);if(!saved||saved.adapter.alive===false)throw Error('Conecta primero el servidor de esta fuente.');
+      if(source.engine!==saved.engine)throw Error('El motor de la conexión ha cambiado.');
+      if(source.profileSignature&&source.profileSignature!==profileSignature(saved.adapter))throw Error('La configuración del servidor ha cambiado. Vuelve a capturar la fuente.');
+      const credentials=authentication.get(saved.adapter);let target=saved.adapter,owned=false;
+      if(saved.engine!=='sqlite'){if(!credentials)throw Error('Conecta de nuevo para disponer de las credenciales de sesión.');target=await drivers[saved.engine].open(credentials.profile,credentials.password);owned=true;}
+      try{if(owned){const catalog=await target.catalog();await restoreQueryContext(target,saved.engine,{database:source.database,databaseName:source.databaseName},catalog.schemas);}
+        const limit=[0,50,100,500,1000].includes(source.rowLimit)?source.rowLimit:1000;
+        if(owned){const readOnly={mysql:'START TRANSACTION READ ONLY',mariadb:'START TRANSACTION READ ONLY',postgresql:'BEGIN READ ONLY',oracle:'SET TRANSACTION READ ONLY'}[saved.engine];if(readOnly)await target.execute(readOnly);}
+        const output=visibleResults(await executeTimed(target,saved.engine,source.sql,settings.get().queryTimeoutSeconds*1000,{rowLimit:limit,runId:randomUUID(),openControl:owned?()=>drivers[saved.engine].open(credentials.profile,credentials.password):controlFor(target)}),limit);
+        const result=output.results[source.resultIndex||0];if(!result?.columns?.length||result.error)throw Error(result?.error||'La consulta no devolvió una tabla.');return {...result,sourceContext:{connectionKey:key,profileSignature:profileSignature(saved.adapter),databaseName:source.databaseName||target.databaseName,rowLimit:limit}};
+      }finally{if(owned)target.close();}
+    });
+  },{allowPending:true}));
+  register('dashboards:capture',(token,indices)=>snapshotDatasets(snapshotFor(token),token,indices));
   const resultEdits = new ResultEdits();
-  register('results:edit-open',(token,index)=>exclusive(async()=>{if(!exportSnapshot||exportSnapshot.token!==token||exportSnapshot.session!==adapter||!Number.isInteger(index))throw new Error('El resultado ha caducado. Ejecuta de nuevo la consulta.');return resultEdits.open(exportSnapshot,index,adapter,currentEngine,currentProfileId||'local');}));
+  register('results:edit-open',(token,index)=>exclusive(async()=>{const snapshot=snapshotFor(token);if(!snapshot||snapshot.session!==adapter||!Number.isInteger(index))throw new Error('El resultado ha caducado. Ejecuta de nuevo la consulta.');return resultEdits.open(snapshot,index,adapter,currentEngine,currentProfileId||'local');}));
   register('results:edit-apply',request=>exclusive(async()=>{
     const source=adapter,engine=currentEngine,key=currentProfileId||'local',runId='data-edit:'+randomUUID(),timeoutMs=settings.get().queryTimeoutSeconds*1000;
-    const result=await resultEdits.apply(request,exportSnapshot,source,key,async(_item,write)=>executeTimed(source,engine,'Aplicar cambios de datos',timeoutMs,{openControl:controlFor(source),runId,onCancellationReleased:()=>window?.webContents.send('execution:released',{runId,key}),execute:async()=>{if(engine==='postgresql'){await source.client.query('SET statement_timeout TO '+timeoutMs);source.queryTimeoutMs=timeoutMs;}return write();}}),state=>{if(window&&!window.isDestroyed())window.webContents.send('results:edit-progress',{token:request.token,...state});});
+    const snapshot=resultEdits.sessions.get(request?.token)?.snapshot;if(!snapshot||snapshotFor(snapshot.token)!==snapshot)throw Error('El resultado ha caducado. Ejecuta de nuevo la consulta.');
+    const result=await resultEdits.apply(request,snapshot,source,key,async(_item,write)=>executeTimed(source,engine,'Aplicar cambios de datos',timeoutMs,{openControl:controlFor(source),runId,onCancellationReleased:()=>window?.webContents.send('execution:released',{runId,key}),execute:async()=>{if(engine==='postgresql'){await source.client.query('SET statement_timeout TO '+timeoutMs);source.queryTimeoutMs=timeoutMs;}return write();}}),state=>{if(window&&!window.isDestroyed())window.webContents.send('results:edit-progress',{token:request.token,...state});});
+    for(const [id,item]of [...dashboardQueries.entries])if(item.snapshot.token===snapshot.token){try{dashboardQueries.remember(id,snapshot);}catch{dashboardQueries.forget(id);}break;}
     return {...result,...databaseStatus()};
   }));
   register('settings:get', () => settings.get());
@@ -244,9 +284,9 @@ app.whenReady().then(() => {
     return readRelations(adapter,currentEngine,schema,cachedSchemas);
   }));
   register('results:export',async(token,index,format,indices)=>{
-    if(!exportSnapshot || exportSnapshot.token!==token || !Number.isInteger(index) || !exportSnapshot.results[index]?.columns?.length)throw new Error('Elige un resultado con columnas para exportar.');
+    const snapshot=snapshotFor(token);if(!snapshot || !Number.isInteger(index) || !snapshot.results[index]?.columns?.length)throw new Error('Elige un resultado con columnas para exportar.');
     if(!['csv','xlsx'].includes(format))throw new Error('Formato no válido.');
-    const result=exportRows(exportSnapshot.results[index],indices);
+    const result=exportRows(snapshot.results[index],indices);
     const selected=await dialog.showSaveDialog(window,{title:'Exportar resultado visible',defaultPath:`resultado.${format}`,filters:[{name:format.toUpperCase(),extensions:[format]}]});
     if(selected.canceled)return false;
     await fs.writeFile(selected.filePath,await exportResult(result,format));return true;
@@ -261,7 +301,8 @@ app.whenReady().then(() => {
     currentDatabase=await adapter.currentDatabase?.()||currentDatabase;
     const output = visibleResults(await executeTimed(adapter,currentEngine,sql,timeoutMs,{openControl:controlFor(adapter),rowLimit:limit}),limit);
     if(output.results.length===1)decorateResult(output.results[0],{sql,engine:currentEngine,database:currentDatabase||'main',adapter});
-    const exportToken=randomUUID();exportSnapshot={token:exportToken,results:output.results,session:adapter};
+    output.results.forEach((r,i)=>{r.label ||= 'Respuesta '+(i+1);});
+    const exportToken=randomUUID();exportSnapshot={token:exportToken,results:output.results,session:adapter,sql,source:{connection:currentName,connectionKey:currentProfileId||'local',profileSignature:profileSignature(adapter),engine:currentEngine,database:currentDatabase,databaseName:adapter?.databaseName,rowLimit:limit}};
     let warning;
     try {
       if (currentEngine === 'sqlite') {
@@ -297,13 +338,13 @@ app.whenReady().then(() => {
         if(output.results.length===1)decorateResult(output.results[0],{sql,engine:currentEngine,database:currentDatabase||'main',adapter,scopeKnown});
         if(!/^\s*SELECT\b/i.test(sql))scopeKnown=false;
         if(retained+size>32000000||results.length+output.results.length>200)throw new Error('El script supera 32 MB o 200 resultados. La sentencia ya se envió al servidor; reduce los resultados antes de repetirla.');retained+=size;changes+=output.changes||0;
-        if(output.results.length)output.results.forEach((result,i)=>results.push({...result,label:`Consulta ${index+1}${output.results.length>1?' · Resultado '+(i+1):''}`,statementIndex:index,sql,elapsed:output.elapsed}));
-        else results.push({columns:[],values:[],label:`Consulta ${index+1}`,statementIndex:index,sql,elapsed:output.elapsed,message:`Sentencia ejecutada. ${output.changes||0} filas modificadas.`});
+        if(output.results.length)output.results.forEach((result,i)=>results.push({...result,label:`Respuesta ${results.length+1}`,statementIndex:index,sql,elapsed:output.elapsed}));
+        else results.push({columns:[],values:[],label:`Respuesta ${results.length+1}`,statementIndex:index,sql,elapsed:output.elapsed,message:`Sentencia ejecutada. ${output.changes||0} filas modificadas.`});
         const item={index,sql,time,status:'success',duration:output.elapsed,rows:output.results.reduce((sum,item)=>sum+item.values.length,0),changes:output.changes||0,truncated:output.results.some(item=>item.truncated)};statementOutputs.push(item);progress({...item,phase:'finish'});
-      }catch(error){const duration=Math.round(performance.now()-tick),item={index,sql,time,status:'error',duration,error:error.message,errorCode:error.code};statementOutputs.push(item);results.push({columns:[],values:[],label:`Consulta ${index+1} · Error`,statementIndex:index,sql,elapsed:duration,error:error.message,errorCode:error.code});progress({...item,phase:'finish'});break;}
+      }catch(error){const duration=Math.round(performance.now()-tick),item={index,sql,time,status:'error',duration,error:error.message,errorCode:error.code};statementOutputs.push(item);results.push({columns:[],values:[],label:`Respuesta ${results.length+1}`,statementIndex:index,sql,elapsed:duration,error:error.message,errorCode:error.code});progress({...item,phase:'finish'});break;}
     }
     let warning;if(!adapter.pendingExecution&&!statementOutputs.some(item=>['QUERY_TIMEOUT','QUERY_CANCELLED'].includes(item.errorCode)))try{if(adapter.alive===false)throw new Error('Sesión cerrada');if(currentEngine==='sqlite'){cachedObjects=await adapter.schema();cachedSchemas=[{name:'main',objects:cachedObjects}];}else{if(adapter.catalogDirty){const catalog=await adapter.catalog();cachedSchemas=catalog.schemas;}currentDatabase=await adapter.currentDatabase();cachedObjects=cachedSchemas.find(item=>item.name===currentDatabase)?.objects||[];}}catch{warning='No se pudo actualizar el explorador tras la ejecución.';}
-    const exportToken=randomUUID();exportSnapshot={token:exportToken,results,session:adapter};return {results,changes,displayLimit:limit,elapsed:Math.round(performance.now()-started),statementOutputs,requestedStatements:statements.length,cancelled:execution.controller.signal.aborted,...databaseStatus(),warning,exportToken};
+    const exportToken=randomUUID();exportSnapshot={token:exportToken,results,session:adapter,source:{connection:currentName,connectionKey:currentProfileId||'local',profileSignature:profileSignature(adapter),engine:currentEngine,database:currentDatabase,databaseName:adapter?.databaseName,rowLimit:limit}};return {results,changes,displayLimit:limit,elapsed:Math.round(performance.now()-started),statementOutputs,requestedStatements:statements.length,cancelled:execution.controller.signal.aborted,...databaseStatus(),warning,exportToken};
     } finally { if (activeExecution === execution) activeExecution = null; }
   }));
   register('database:catalog', () => exclusive(async () => {

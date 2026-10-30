@@ -1,6 +1,6 @@
 {
   "name": "lqtac-database",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "private": true,
   "description": "LQTAC Data Base — espacio de trabajo modular para bases de datos",
   "main": "src/main.cjs",
@@ -23,7 +23,19 @@
     "test:workflow": "electron test/copy-files-reconnect-smoke.cjs",
     "test:statements": "electron test/statement-runner-smoke.cjs",
     "test:settings": "electron test/settings-indent-smoke.cjs",
-    "test:data-edit": "electron test/result-edit-smoke.cjs"
+    "test:dashboard-relationships": "electron test/dashboard-relationship-smoke.cjs",
+    "test:dashboard-analytics": "electron test/dashboard-analytics-smoke.cjs",
+    "test:dashboard-motion": "electron test/dashboard-motion-smoke.cjs",
+    "test:dashboard-builder": "electron test/dashboard-builder-smoke.cjs",
+    "test:dashboard": "electron test/dashboard-smoke.cjs",
+    "test:data-edit": "electron test/result-edit-smoke.cjs",
+    "test:dashboard-access": "electron test/dashboard-access-smoke.cjs",
+    "test:dashboard-refresh": "electron test/dashboard-refresh-smoke.cjs",
+    "test:dashboard-library": "electron test/dashboard-library-smoke.cjs",
+    "test:query-responses": "electron test/query-responses-smoke.cjs",
+    "test:dashboard-fields": "electron test/dashboard-fields-smoke.cjs",
+    "test:dashboard-transfer": "electron test/dashboard-transfer-smoke.cjs",
+    "test:dashboard-functions": "electron test/dashboard-functions-smoke.cjs"
   },
   "dependencies": {
     "mysql2": "3.24.6",
@@ -39,5 +51,15 @@
   "devDependencies": {
     "electron": "45.0.0"
   },
-  "overrides": { "tedious": { "@azure/identity": "4.13.0" }, "@azure/msal-node": { "uuid": "11.1.1" }, "exceljs": { "uuid": "11.1.1" } }
+  "overrides": {
+    "tedious": {
+      "@azure/identity": "4.13.0"
+    },
+    "@azure/msal-node": {
+      "uuid": "11.1.1"
+    },
+    "exceljs": {
+      "uuid": "11.1.1"
+    }
+  }
 }
