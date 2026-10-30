@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createWriteStream } = require('node:fs');
 const archiver = require('archiver');
+const { execFileSync } = require('node:child_process');
 const desktop = path.resolve(__dirname, '..');
 async function build() {
   if (process.platform !== 'win32') throw new Error('Este paquete portable se genera en Windows.');
@@ -18,6 +19,7 @@ async function build() {
   });
   await fs.cp(path.join(desktop, 'node_modules/electron/dist'), directory, { recursive: true });
   await fs.rename(path.join(directory, 'electron.exe'), path.join(directory, 'LQTAC Data Base.exe'));
+  execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'set-portable-icon.ps1'), '-Executable', path.join(directory, 'LQTAC Data Base.exe'), '-Icon', path.join(desktop, '../assets/branding/app-icon.ico')], { stdio: 'inherit' });
   const application = path.join(directory, 'resources/app');
   await fs.mkdir(path.join(application, 'desktop'), { recursive: true });
   await fs.cp(path.join(desktop, 'src'), path.join(application, 'desktop/src'), { recursive: true });
