@@ -8,6 +8,7 @@ desktop/.data/
 desktop/.data-*.log
 desktop/dist/
 desktop/Data/
+/LQTAC Data Base Desarrollo.lnk
 desktop/.env
 desktop/.env.*
 !desktop/.env.example
@@ -79,3 +80,5 @@ test/**/workspace/
 # Python manual build caches
 __pycache__/
 *.pyc
+
+/LQTAC dbFox Desarrollo.lnk

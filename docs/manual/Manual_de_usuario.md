@@ -1,6 +1,6 @@
-# LQTAC Data Base 0.2.0 - Manual de usuario
+# LQTAC dbFox 0.2.4 - Manual de usuario
 
-Actualizado: 29 de octubre de 2026.
+Actualizado: 31 de octubre de 2026.
 Capturas reales con datos ficticios y SQLite local.
 
 ## Abrir y empezar a trabajar
@@ -9,15 +9,15 @@ Conecta con un servidor o practica con una base local antes de trabajar con tus 
 
 ![Captura de Abrir y empezar a trabajar](assets/01-inicio.png)
 
-Inicio real de LQTAC Data Base. El laboratorio es independiente de tus servidores.
+Inicio real de LQTAC dbFox. El laboratorio es independiente de tus servidores.
 
 ### 1. Abre la aplicación
 
-En la versión portable, extrae todo el ZIP y ejecuta LQTAC Data Base.exe. Conserva juntos el ejecutable, sus carpetas y portable.json. No necesitas instalar Node.js.
+En la versión portable, extrae todo el ZIP y ejecuta LQTAC dbFox.exe. Conserva juntos el ejecutable, sus carpetas y portable.json. No necesitas instalar Node.js.
 
 ### 2. Elige cómo empezar
 
-Nueva conexión abre el formulario de un servidor. Abrir archivo SQLite carga una copia local en memoria. Probar el laboratorio abre una base de ejemplo para practicar sin conectar con un servidor.
+Nueva conexión configura un servidor. Nueva base SQLite crea un archivo vacío; Abrir archivo SQLite carga una copia en memoria. El laboratorio permite practicar sin servidor.
 
 ### 3. Comprueba el destino
 
@@ -37,7 +37,7 @@ En Resultados, elige estado y busca Activo. Ordena por nombre desde su cabecera 
 
 ### 3. Edita sin escribir en un servidor
 
-Activa Editar datos, haz doble clic en una celda de estado y escribe En revisión. Enter deja el valor pendiente. Arrastra su tirador a otra fila o haz doble clic en él para copiarlo a toda la columna visible. Pulsa Descartar para deshacer o Aplicar cambios para actualizar la copia local.
+Haz doble clic o pulsa F2 en una celda editable y escribe En revisión. Enter deja el valor pendiente. Arrastra el tirador para copiarlo; pulsa Descartar o Aplicar cambios.
 
 ### 4. Conserva o descarta la práctica
 
@@ -53,7 +53,7 @@ Ejemplo con dos consultas y pestañas independientes de resultados.
 
 ### Barra izquierda y explorador
 
-La barra estrecha abre Inicio, Conexiones, Editor SQL y Módulos. El explorador contiene los perfiles y los objetos de la sesión seleccionada. Espacio de trabajo permanece plegado al pie del lateral hasta que lo despliegas.
+La barra izquierda abre Inicio, Conexiones, Editor SQL, Módulos y Dashboards. El explorador muestra perfiles y objetos; Acerca de aparece al pie y el botón ? abre el manual.
 
 ### Editor, resultados y salidas
 
@@ -65,7 +65,7 @@ Arrastra los separadores para cambiar el ancho del explorador o la altura del ed
 
 ## Crear un perfil de servidor
 
-Un perfil guarda cómo localizar el servidor; la contraseña se solicita al conectar.
+Un perfil guarda cómo localizar el servidor; puedes guardar la contraseña cifrada de forma opcional.
 
 ![Captura de Crear un perfil de servidor](assets/02-conexion.png)
 
@@ -77,7 +77,7 @@ Pulsa Nueva conexión o el signo + del explorador. Elige el motor y escribe un n
 
 ### 2. Guarda y comprueba
 
-Guarda el perfil. Al conectar, introduce la contraseña; Probar conexión permite comprobar el acceso. TLS necesita un certificado de confianza. Si el servidor está en una red privada, activa la VPN del equipo.
+Al conectar, introduce la contraseña. Si activas Recordar contraseña se guarda cifrada y podrás conectar directamente. Probar conexión comprueba el acceso; TLS requiere un certificado de confianza.
 
 ### 3. Usa la misma dirección que funciona
 
@@ -106,7 +106,7 @@ SQL Server usa autenticación SQL por TCP: indica el puerto, sin añadir \instan
 
 ### SQLite
 
-Abre un archivo o el laboratorio, sin perfil de servidor. Los cambios se mantienen en memoria hasta pulsar Guardar copia.
+Crea una base local vacía o abre un archivo o el laboratorio, sin servidor. Los cambios se mantienen en memoria hasta pulsar Guardar copia.
 
 ## Conexiones, grupos y objetos
 
@@ -118,7 +118,7 @@ El icono de encendido verde indica una sesión abierta; el rojo, una conexión a
 
 ### Menú de una conexión
 
-Con el botón derecho puedes conectar, borrar el perfil o añadirlo a un grupo. Borrar el perfil no elimina las bases del servidor. Desconectar cierra esa sesión y puede descartar transacciones sin confirmar.
+El botón derecho permite conectar, editar, duplicar, gestionar la contraseña, agrupar y borrar. En Conexiones puedes exportar o restaurar perfiles y grupos mediante un archivo .lqtdb cifrado.
 
 ### Buscar y seleccionar una base
 
@@ -172,7 +172,7 @@ El botón rojo Detener solicita cancelar la sentencia activa y frena las siguien
 
 Las herramientas de Resultados trabajan sobre las filas recibidas en esa pestaña.
 
-![Captura de Ordenar, filtrar y limitar filas](assets/11-resultados-detalle.png)
+![Captura de Ordenar, filtrar y limitar filas](assets/05b-editar.png)
 
 Consulta del laboratorio. Los resultados corresponden a datos ficticios.
 
@@ -212,13 +212,13 @@ La exportación se desactiva mientras hay ediciones pendientes. Aplica o descart
 
 Editar datos cambia valores de filas; es una operación distinta de cambiar la estructura de una tabla.
 
-![Captura de Modificar registros y aplicar](assets/09-edicion-detalle.png)
+![Captura de Modificar registros y aplicar](assets/05b-editar.png)
 
 Ciudad modificada localmente: el resaltado indica que todavía falta Aplicar cambios.
 
 ### 1. Activa la edición
 
-Ejecuta una consulta directa como SELECT * FROM main.clientes ORDER BY id; y pulsa Editar datos. Para servidores, sustituye main por la base o esquema correcto. La tabla debe tener clave primaria incluida en el resultado.
+En una consulta SELECT * de una tabla con clave primaria, haz doble clic o pulsa F2 en una celda. También puedes activar Editar datos en la barra de resultados.
 
 ### 2. Edita sin guardar todavía
 
@@ -232,7 +232,7 @@ Las celdas pendientes se resaltan. Aplicar cambios envía las modificaciones; De
 
 El tirador de la celda seleccionada copia un valor a otras filas visibles de la misma columna.
 
-![Captura de Arrastrar y autorrellenar una columna](assets/10-tirador-detalle.png)
+![Captura de Arrastrar y autorrellenar una columna](assets/05b-editar.png)
 
 El tirador es el pequeño cuadrado azul en la esquina inferior derecha de la celda Barcelona.
 
@@ -585,4 +585,4 @@ Extrae el ZIP nuevo en otra carpeta. Cierra las dos versiones y copia tu carpeta
 
 ### Primera apertura y comprobación
 
-Abre LQTAC Data Base.exe desde la carpeta completa. Revisa tus conexiones, consultas y dashboards antes de retirar la versión anterior. Las credenciales se solicitan de nuevo al conectar. El archivo SHA256 de la release sirve para comprobar la integridad de las descargas.
+Abre LQTAC dbFox.exe desde la carpeta completa. Revisa tus conexiones, consultas y dashboards. Las contraseñas guardadas pueden requerir introducirse de nuevo en otro equipo o cuenta.

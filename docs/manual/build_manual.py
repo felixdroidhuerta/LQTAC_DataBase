@@ -14,10 +14,41 @@ from content import PAGES
 from dashboard_content import DASHBOARD_PAGES
 PAGES = PAGES + DASHBOARD_PAGES
 
+# Keep the guide aligned with the current product and its existing SQLite/credential behavior.
+for page in PAGES:
+    for key in ('title', 'lead', 'caption'):
+        if key in page: page[key] = page[key].replace('LQTAC Data Base', 'LQTAC dbFox')
+    page['blocks'] = [(title, text.replace('LQTAC Data Base.exe', 'LQTAC dbFox.exe').replace('LQTAC Data Base', 'LQTAC dbFox')) for title, text in page.get('blocks', [])]
+    edits = {
+        'Abrir y empezar a trabajar': {
+            '2. Elige cómo empezar': 'Nueva conexión configura un servidor. Nueva base SQLite crea un archivo vacío; Abrir archivo SQLite carga una copia en memoria. El laboratorio permite practicar sin servidor.'},
+        'Conocer y organizar la pantalla': {
+            'Barra izquierda y explorador': 'La barra izquierda abre Inicio, Conexiones, Editor SQL, Módulos y Dashboards. El explorador muestra perfiles y objetos; Acerca de aparece al pie y el botón ? abre el manual.'},
+        'Crear un perfil de servidor': {
+            '2. Guarda y comprueba': 'Al conectar, introduce la contraseña. Si activas Recordar contraseña se guarda cifrada y podrás conectar directamente. Probar conexión comprueba el acceso; TLS requiere un certificado de confianza.'},
+        'Elegir el motor correcto': {
+            'SQLite': 'Crea una base local vacía o abre un archivo o el laboratorio, sin servidor. Los cambios se mantienen en memoria hasta pulsar Guardar copia.'},
+        'Conexiones, grupos y objetos': {
+            'Menú de una conexión': 'El botón derecho permite conectar, editar, duplicar, gestionar la contraseña, agrupar y borrar. En Conexiones puedes exportar o restaurar perfiles y grupos mediante un archivo .lqtdb cifrado.'},
+        'Practicar con el laboratorio': {
+            '3. Edita sin escribir en un servidor': 'Haz doble clic o pulsa F2 en una celda editable y escribe En revisión. Enter deja el valor pendiente. Arrastra el tirador para copiarlo; pulsa Descartar o Aplicar cambios.'},
+        'Modificar registros y aplicar': {
+            '1. Activa la edición': 'En una consulta SELECT * de una tabla con clave primaria, haz doble clic o pulsa F2 en una celda. También puedes activar Editar datos en la barra de resultados.'},
+        'Conservar respuestas y actualizar la aplicación': {
+            'Primera apertura y comprobación': 'Abre LQTAC dbFox.exe desde la carpeta completa. Revisa tus conexiones, consultas y dashboards. Las contraseñas guardadas pueden requerir introducirse de nuevo en otro equipo o cuenta.'}
+    }
+    if page['title'] in edits:
+        page['blocks'] = [(title, edits[page['title']].get(title, text)) for title, text in page['blocks']]
+    if page['title'] == 'Crear un perfil de servidor': page['lead'] = 'Un perfil guarda cómo localizar el servidor; puedes guardar la contraseña cifrada de forma opcional.'
+    if page['title'] in ('Ordenar, filtrar y limitar filas', 'Modificar registros y aplicar'):
+        page['image'], page['crop'] = '05b-editar.png', 'stems-results'
+    if page['title'] == 'Arrastrar y autorrellenar una columna':
+        page['image'], page['crop'] = '05b-editar.png', 'fill-handle'
+
 ROOT=Path(__file__).resolve().parents[2]
 ASSETS=Path(__file__).parent/'assets'
 VERSION=sys.argv[2] if len(sys.argv)>2 else json.loads((ROOT/'desktop/package.json').read_text(encoding='utf-8'))['version']
-OUT=Path(sys.argv[1]).resolve() if len(sys.argv)>1 else ROOT/f'output/pdf/LQTAC_DataBase_Manual_de_usuario_{VERSION}.pdf'
+OUT=Path(sys.argv[1]).resolve() if len(sys.argv)>1 else ROOT/f'output/pdf/LQTAC_dbFox_Manual_de_usuario_{VERSION}.pdf'
 OUT.parent.mkdir(parents=True,exist_ok=True)
 for name,file in [('Segoe','segoeui.ttf'),('SegoeB','segoeuib.ttf')]:
     pdfmetrics.registerFont(TTFont(name,str(Path('C:/Windows/Fonts')/file)))
@@ -31,10 +62,10 @@ LEAD=ParagraphStyle('lead',fontName='Segoe',fontSize=11.2,leading=16,textColor=G
 TITLE=ParagraphStyle('title',fontName='SegoeB',fontSize=25,leading=29,textColor=NAVY)
 CAP=ParagraphStyle('caption',fontName='Segoe',fontSize=8.2,leading=11,textColor=GRAY)
 c=canvas.Canvas(str(OUT),pagesize=(W,H),pageCompression=1)
-c.setTitle('LQTAC Data Base '+VERSION+' · Manual de usuario')
-c.setAuthor('LQTAC Data Base')
+c.setTitle('LQTAC dbFox '+VERSION+' · Manual de usuario')
+c.setAuthor('LQTAC dbFox')
 c.setSubject('Guía funcional ilustrada: conexiones, SQL, resultados, edición y configuración')
-c.setCreator('LQTAC Data Base · Manual mantenible con ReportLab')
+c.setCreator('LQTAC dbFox · Manual mantenible con ReportLab')
 TOTAL=len(PAGES)+2
 
 def para(text,x,y,width,style):
@@ -44,7 +75,7 @@ def para(text,x,y,width,style):
 def footer(page):
     c.setStrokeColor(LIGHT);c.setLineWidth(.6);c.line(LEFT,43,RIGHT,43)
     c.setFillColor(GRAY);c.setFont('Segoe',8)
-    c.drawString(LEFT,28,'LQTAC Data Base '+VERSION+'  /  Manual de usuario')
+    c.drawString(LEFT,28,'LQTAC dbFox '+VERSION+'  /  Manual de usuario')
     c.drawRightString(RIGHT,28,f'{page:02d} / {TOTAL:02d}')
     if page>2:
         c.linkRect('Volver al índice','contents',(LEFT,22,RIGHT-60,40),relative=0,thickness=0)
@@ -53,6 +84,7 @@ def image(name,y,max_h=310,crop=None):
     im=Image.open(ASSETS/name).convert('RGB')
     if crop=='library':im=im.crop((270,100,940,530))
     if crop=='stems-results':im=im.crop((0,round(im.height*.53),im.width,im.height))
+    if crop=='fill-handle':im=im.crop((round(im.width*.49),round(im.height*.62),round(im.width*.77),round(im.height*.84)))
     if crop=='split-mask':
         first,second=im.crop((0,0,im.width,326)),im.crop((0,326,im.width,im.height))
         pair=Image.new('RGB',(im.width*2+16,max(first.height,second.height)),'white')
@@ -72,14 +104,16 @@ c.bookmarkPage('cover');c.addOutlineEntry('Portada','cover',0)
 c.setFillColor(HexColor('#061329'));c.rect(0,642,W,150,fill=1,stroke=0)
 logo=Image.open(ROOT/'assets/branding/app-icon.png')
 c.drawImage(ImageReader(logo),LEFT,698,width=66,height=66,mask='auto')
-wordmark=Image.open(ROOT/'assets/branding/lqtac-data-base-white.png')
-c.drawImage(ImageReader(wordmark),LEFT+84,677,width=240,height=120,mask='auto')
+wordmark=Image.open(ROOT/'assets/branding/lqtac-data-base-white.png').crop((0,160,1774,590))
+c.setFillColor(white);c.setFont('SegoeB',31);c.drawString(LEFT+84,735,'dbFox')
+c.setFillColor(HexColor('#c5d8ec'));c.setFont('Segoe',12);c.drawString(LEFT+85,708,'by')
+c.drawImage(ImageReader(wordmark),LEFT+104,705,width=73,height=18,mask='auto')
 c.setFillColor(HexColor('#79e5f5'));c.setFont('SegoeB',9);c.drawString(LEFT,667,'GUÍA FUNCIONAL  /  VERSIÓN '+VERSION)
 para('Manual de usuario',LEFT,609,WIDTH,ParagraphStyle('cover',parent=TITLE,fontSize=35,leading=41,textColor=HexColor('#111111')))
 para('Conectar, consultar y trabajar con tus datos.',LEFT,548,WIDTH,LEAD)
 y=image('03-consultas.png',505,max_h=335)
 para('Conexiones · SQL · Resultados · Dashboards',LEFT,y-13,WIDTH,HEAD)
-para('Actualizado · 29 de octubre de 2026\nCapturas reales con datos ficticios y SQLite local.\nEdición '+VERSION+' con las mejoras del 29 de octubre de 2026.',LEFT,108,WIDTH,CAP)
+para('Actualizado · 31 de octubre de 2026\nCapturas reales con datos ficticios y SQLite local.\nEdición '+VERSION+'.',LEFT,108,WIDTH,CAP)
 footer(1);c.showPage()
 
 # Two-column, linked contents.
@@ -128,7 +162,7 @@ for i,p in enumerate(PAGES):
     if y<BOTTOM:raise RuntimeError(f'Page {number} overflow: bottom {y:.1f} / {p["title"]}')
     footer(number);c.showPage()
 c.save()
-md=['# LQTAC Data Base '+VERSION+' - Manual de usuario','','Actualizado: 29 de octubre de 2026.','Capturas reales con datos ficticios y SQLite local.']
+md=['# LQTAC dbFox '+VERSION+' - Manual de usuario','','Actualizado: 31 de octubre de 2026.','Capturas reales con datos ficticios y SQLite local.']
 for p in PAGES:
     md.extend(['','## '+p['title'],'',p['lead']])
     if p.get('image'):md.extend(['','![Captura de '+p['title']+'](assets/'+p['image']+')','',p['caption']])

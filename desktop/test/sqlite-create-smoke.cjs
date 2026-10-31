@@ -1,0 +1,20 @@
+const {app,BrowserWindow,dialog}=require('electron');
+const fs=require('node:fs');const os=require('node:os');const path=require('node:path');const assert=require('node:assert/strict');
+const {SQLiteAdapter}=require('../src/adapters/sqlite.cjs');
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'dbfox-sqlite-create-'));app.setPath('userData',dir);
+app.on('browser-window-created',(_event,w)=>{w.hide();w.webContents.setBackgroundThrottling(false)});
+let filename=path.join(dir,'nueva.sqlite'), canceled=false;
+dialog.showSaveDialog=async()=>({canceled,filePath:filename});
+require('../src/main.cjs');const timer=setTimeout(()=>{console.error('SQLite creation timed out');app.exit(1)},30000);
+app.whenReady().then(async()=>{const w=BrowserWindow.getAllWindows()[0];const js=code=>w.webContents.executeJavaScript(code);try{
+ if(w.webContents.isLoading())await new Promise(r=>w.webContents.once('did-finish-load',r));
+ canceled=true;assert.equal(await js('window.lqtac.create()'),null);assert.equal(fs.existsSync(filename),false);canceled=false;
+ await js('document.querySelector("#create-sqlite-home").click()');
+ await js('new Promise((resolve,reject)=>{let start=Date.now();function poll(){if(document.querySelector("#connection-label").textContent==="nueva.sqlite"&&!document.querySelector("#run-query").disabled)return resolve();if(Date.now()-start>8000)return reject(Error("La base no se abrió"));setTimeout(poll,30)}poll()})');
+ assert.ok(fs.existsSync(filename));const initial=await SQLiteAdapter.fromBytes(fs.readFileSync(filename));assert.deepEqual(await initial.schema(),[]);initial.close();
+ await js('window.lqtac.execute("CREATE TABLE clientes (id INTEGER PRIMARY KEY, nombre TEXT); INSERT INTO clientes VALUES (1, \'Ana\')", "local")');
+ const before=await SQLiteAdapter.fromBytes(fs.readFileSync(filename));assert.deepEqual(await before.schema(),[]);before.close();
+ filename=path.join(dir,'guardada.sqlite');await js('window.lqtac.export()');const saved=await SQLiteAdapter.fromBytes(fs.readFileSync(filename));assert.deepEqual(saved.execute('SELECT nombre FROM clientes').results[0].values,[['Ana']]);saved.close();
+ const old=fs.readFileSync(filename);await assert.rejects(js('window.lqtac.create()'),/Ya existe un archivo/);assert.deepEqual(fs.readFileSync(filename),old);
+ console.log('PASS: crear SQLite vacío, cancelar, guardar cambios y proteger archivos existentes');clearTimeout(timer);app.exit(0);
+}catch(e){console.error(e);clearTimeout(timer);app.exit(1)}});

@@ -1,0 +1,21 @@
+const {app,BrowserWindow,shell}=require('electron');
+const assert=require('node:assert/strict');const fs=require('node:fs');const os=require('node:os');const path=require('node:path');
+app.disableHardwareAcceleration();app.setPath('userData',fs.mkdtempSync(path.join(os.tmpdir(),'dbfox-about-')));
+let opened='';shell.openPath=async file=>{opened=file;return '';};
+require('../src/main.cjs');const timer=setTimeout(()=>{console.error('About/help test timed out');app.exit(1)},30000);
+app.whenReady().then(async()=>{const w=BrowserWindow.getAllWindows()[0];w.webContents.setBackgroundThrottling(false);const js=code=>w.webContents.executeJavaScript(code);try{
+ if(w.webContents.isLoading())await new Promise(r=>w.webContents.once('did-finish-load',r));
+ assert.equal(await js('document.querySelector("#workspace-panel")'),null);
+ assert.equal(await js('document.querySelector(".badge")'),null);
+ await js('document.querySelector("#open-about").click()');
+ assert.equal(await js('document.querySelector("#about-dialog").open'),true);
+ assert.equal(await js('document.querySelector("#about-heading").textContent'),'dbFox');
+ assert.equal(await js('document.querySelector("#about-dialog .about-banner img").naturalWidth > 0'),true);
+ await js('window.lqtac.appInfo().then(x=>document.querySelector("#about-version").textContent=x.version)');
+ assert.equal(await js('document.querySelector("#about-version").textContent'),app.getVersion());
+ await js('window.lqtac.openManual()');assert.equal(path.basename(opened),'LQTAC_dbFox_Manual_de_usuario_0.2.4.pdf');assert.ok(fs.existsSync(opened));
+ await js('document.querySelector("#close-about").click()');assert.equal(await js('document.querySelector("#about-dialog").open'),false);
+ assert.equal(await js('document.querySelector("#open-help").getAttribute("aria-label")'),'Abrir manual de usuario');
+ opened='';await js('document.querySelector("#open-help").click()');for(let i=0;i<50&&!opened;i++)await new Promise(r=>setTimeout(r,20));assert.equal(path.basename(opened),'LQTAC_dbFox_Manual_de_usuario_0.2.4.pdf');
+ console.log('PASS: Acerca de, versión, logo y apertura del manual');clearTimeout(timer);app.exit(0);
+}catch(error){console.error(error);clearTimeout(timer);app.exit(1);}});

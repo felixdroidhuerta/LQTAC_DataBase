@@ -5,7 +5,7 @@ class PostgreSQLAdapter {
   static async open(profile, password) {
     const client = new Client({ host: profile.host, port: profile.port, user: profile.username, password,
       database: profile.database || 'postgres', ssl: profile.tls ? { rejectUnauthorized: true } : false,
-      connectionTimeoutMillis: 10000, statement_timeout: 30000, application_name: 'LQTAC Data Base', keepAlive: true });
+      connectionTimeoutMillis: 10000, statement_timeout: 30000, application_name: 'LQTAC dbFox', keepAlive: true });
     const adapter = new PostgreSQLAdapter(client);
     try { await client.connect(); return adapter; } catch (error) { adapter.close(); throw error; }
   }

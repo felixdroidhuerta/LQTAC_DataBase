@@ -7,7 +7,7 @@ class SQLServerAdapter {
       authentication: { type: 'default', options: { userName: profile.username, password } },
       options: { port: profile.port, ...(profile.database ? { database: profile.database } : {}), encrypt: profile.tls === true,
         trustServerCertificate: false, connectTimeout: 10000, requestTimeout: 30000, cancelTimeout: 5000,
-        appName: 'LQTAC Data Base', useColumnNames: false, rowCollectionOnRequestCompletion: false, rowCollectionOnDone: false } });
+        appName: 'LQTAC dbFox', useColumnNames: false, rowCollectionOnRequestCompletion: false, rowCollectionOnDone: false } });
     const adapter = new SQLServerAdapter(connection);
     try { await new Promise((resolve, reject) => connection.connect(error => error ? reject(error) : resolve())); return adapter; }
     catch (error) { adapter.close(); throw error; }

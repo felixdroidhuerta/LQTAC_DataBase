@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, session, clipboard, safeStorage } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, session, clipboard, safeStorage, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 // Configure Chromium storage before ready so the entire workspace travels with the portable folder.
@@ -11,7 +11,7 @@ if (app.isPackaged && require('node:fs').existsSync(path.join(path.dirname(proce
     app.setPath('sessionData', portableData);
     app.setAppLogsPath(path.join(portableData, 'logs'));
   } catch (error) {
-    dialog.showErrorBox('LQTAC Data Base portable', 'No se puede escribir en la carpeta Data. Mueve la aplicación a una carpeta con permiso de escritura.\n' + error.message);
+    dialog.showErrorBox('LQTAC dbFox portable', 'No se puede escribir en la carpeta Data. Mueve la aplicación a una carpeta con permiso de escritura.\n' + error.message);
     app.exit(1);
   }
 }
@@ -19,6 +19,7 @@ const { pathToFileURL } = require('node:url');
 const { SQLiteAdapter } = require('./adapters/sqlite.cjs');
 const { ConnectionStore } = require('./connections.cjs');
 const { CredentialStore } = require('./credentials.cjs');
+const { encryptPackage, decryptPackage, restorePackage, MAX_BYTES: MAX_CONNECTION_BACKUP } = require('./connection-transfer.cjs');
 const { MySQLAdapter } = require('./adapters/mysql.cjs');
 const { ClickHouseAdapter } = require('./adapters/clickhouse.cjs');
 const { MongoDBAdapter } = require('./adapters/mongodb.cjs');
@@ -130,8 +131,8 @@ app.whenReady().then(() => {
   register('dashboards:queries',ids=>dashboardQueries.list(ids));
   register('dashboards:query-capture',requests=>dashboardQueries.capture(requests));
   let pendingDashboardImport=null;
-  register('dashboards:export',async request=>{const board=request?.id?await dashboards.read(request.id):request?.board;const pkg=await exportPackage(board,app.getVersion());const name='LQTAC-'+pkg.board.name.replace(/[<>:"/\\|?*\x00-\x1f]/g,'_')+'.lqtac-dashboard';const selected=await dialog.showSaveDialog(window,{title:'Exportar dashboard con sus datos y consultas',defaultPath:name,filters:[{name:'Dashboard LQTAC Data Base',extensions:['lqtac-dashboard']}]});if(selected.canceled)return null;await fs.writeFile(selected.filePath,JSON.stringify(pkg),{encoding:'utf8',mode:0o600});return {name:path.basename(selected.filePath)};});
-  register('dashboards:import-prepare',async()=>{const selected=await dialog.showOpenDialog(window,{title:'Importar dashboard LQTAC Data Base',properties:['openFile'],filters:[{name:'Dashboard LQTAC Data Base',extensions:['lqtac-dashboard','json']}]});if(selected.canceled)return null;const file=selected.filePaths[0];if((await fs.stat(file)).size>24000000)throw Error('El archivo supera 24 MB.');const pkg=await parsePackage(await fs.readFile(file,'utf8')),token=randomUUID();pendingDashboardImport={token,pkg,expires:Date.now()+900000};return {token,name:pkg.board.name,datasets:pkg.board.datasets.length,widgets:pkg.board.widgets.length,connections:pkg.connections};});
+  register('dashboards:export',async request=>{const board=request?.id?await dashboards.read(request.id):request?.board;const pkg=await exportPackage(board,app.getVersion());const name='LQTAC-'+pkg.board.name.replace(/[<>:"/\\|?*\x00-\x1f]/g,'_')+'.lqtac-dashboard';const selected=await dialog.showSaveDialog(window,{title:'Exportar dashboard con sus datos y consultas',defaultPath:name,filters:[{name:'Dashboard LQTAC dbFox',extensions:['lqtac-dashboard']}]});if(selected.canceled)return null;await fs.writeFile(selected.filePath,JSON.stringify(pkg),{encoding:'utf8',mode:0o600});return {name:path.basename(selected.filePath)};});
+  register('dashboards:import-prepare',async()=>{const selected=await dialog.showOpenDialog(window,{title:'Importar dashboard LQTAC dbFox',properties:['openFile'],filters:[{name:'Dashboard LQTAC dbFox',extensions:['lqtac-dashboard','json']}]});if(selected.canceled)return null;const file=selected.filePaths[0];if((await fs.stat(file)).size>24000000)throw Error('El archivo supera 24 MB.');const pkg=await parsePackage(await fs.readFile(file,'utf8')),token=randomUUID();pendingDashboardImport={token,pkg,expires:Date.now()+900000};return {token,name:pkg.board.name,datasets:pkg.board.datasets.length,widgets:pkg.board.widgets.length,connections:pkg.connections};});
   register('dashboards:import-cancel',token=>{if(pendingDashboardImport?.token===token)pendingDashboardImport=null;});
   register('dashboards:import-finish',async(token,options)=>{const pending=pendingDashboardImport;if(!pending||pending.token!==token||pending.expires<Date.now())throw Error('La importación ha caducado. Selecciona el archivo de nuevo.');if(pending.processing)throw Error('Esta importación ya está en curso.');pending.processing=true;try{const board=await importPackage(pending.pkg,options,await connections.list());const saved=await dashboards.save(board);if(pendingDashboardImport===pending)pendingDashboardImport=null;return {id:saved.id,name:saved.name};}finally{pending.processing=false;}});
   register('dashboards:query-check',(sql,engine)=>{refreshQuery(sql,engine);return true;});
@@ -165,6 +166,15 @@ app.whenReady().then(() => {
     return {...result,...databaseStatus()};
   }));
   register('settings:get', () => settings.get());
+  register('app:info', () => ({ version: app.getVersion(), manualVersion: '0.2.4' }));
+  register('app:manual', async () => {
+    const portable = require('node:fs').existsSync(path.join(path.dirname(process.execPath), 'portable.json'));
+    const file = portable ? path.join(path.dirname(process.execPath), 'Manual-de-usuario-0.2.4.pdf') : path.resolve(__dirname, '../../output/pdf/LQTAC_dbFox_Manual_de_usuario_0.2.4.pdf');
+    try { await fs.access(file); } catch { throw Error('No se encuentra el manual de usuario en esta instalación.'); }
+    const error = await shell.openPath(file);
+    if (error) throw Error('No se pudo abrir el manual: ' + error);
+    return true;
+  });
   register('settings:save', value => settings.save(value));
   register('database:cancel', (runId, key) => {
     if (typeof runId !== 'string' || typeof key !== 'string') throw new Error('Identificador de ejecución no válido.');
@@ -182,11 +192,40 @@ app.whenReady().then(() => {
   };
   const connections = new ConnectionStore(app.getPath('userData'));
   const credentials = new CredentialStore(app.getPath('userData'), safeStorage);
+  let pendingConnectionImport = null;
   const sqlFiles=new SQLFiles(app.getPath('userData'));
   register('sql:open',async()=>{const result=await dialog.showOpenDialog(window,{title:'Abrir archivo SQL',properties:['openFile'],filters:[{name:'Consultas SQL',extensions:['sql']},{name:'Texto',extensions:['txt']}]});return result.canceled?null:sqlFiles.open(result.filePaths[0]);});
   register('sql:save',request=>sqlFiles.save(request,async()=>{const result=await dialog.showSaveDialog(window,{title:'Guardar archivo SQL',defaultPath:'consulta.sql',filters:[{name:'Consultas SQL',extensions:['sql']}]});return result.canceled?null:result.filePath;}));
   register('clipboard:write',text=>{if(typeof text!=='string'||text.length>8000000)throw new Error('El contenido supera el límite de copia (8 millones de caracteres).');clipboard.writeText(text);return true;});
   register('connections:list', () => connections.list());
+  register('connections:export', (passphrase) => exclusive(async () => {
+    const profiles=await connections.list(), groups=await connections.groups(), passwords=[];
+    for (const profile of profiles) if (await credentials.has(profile.id)) passwords.push({id:profile.id,password:await credentials.get(profile.id)});
+    const content=await encryptPackage({format:'LQTAC Connections',version:1,profiles,groups,passwords},passphrase);
+    const chosen=await dialog.showSaveDialog(window,{title:'Exportar conexiones y grupos',defaultPath:'LQTAC-conexiones.lqtdb',filters:[{name:'Copia de conexiones LQTAC',extensions:['lqtdb']}]});
+    if(chosen.canceled)return null;
+    await fs.writeFile(chosen.filePath,content,{mode:0o600});
+    return {profiles:profiles.length,groups:groups.length,passwords:passwords.length};
+  }, {allowPending:true}));
+  register('connections:import-prepare', async passphrase => {
+    pendingConnectionImport=null;
+    const chosen=await dialog.showOpenDialog(window,{title:'Importar conexiones y grupos',properties:['openFile'],filters:[{name:'Copia de conexiones LQTAC',extensions:['lqtdb']}]});
+    if(chosen.canceled)return null;
+    const file=chosen.filePaths[0]; if((await fs.stat(file)).size>MAX_CONNECTION_BACKUP*2)throw Error('El archivo supera el tamaño permitido.');
+    const payload=await decryptPackage(await fs.readFile(file,'utf8'),passphrase), token=randomUUID();
+    const current=JSON.stringify([await connections.list(),await connections.groups(),await credentials.read()]);
+    pendingConnectionImport={token,payload,current,expires:Date.now()+300000};
+    return {token,profiles:payload.profiles.length,groups:payload.groups.length,passwords:payload.passwords.length};
+  });
+  register('connections:import-cancel', token => { if(pendingConnectionImport?.token===token)pendingConnectionImport=null; });
+  register('connections:import-finish', token => exclusive(async () => {
+    const pending=pendingConnectionImport; pendingConnectionImport=null;
+    if(!pending || pending.token!==token || pending.expires<Date.now())throw Error('La importación ha caducado. Selecciona el archivo de nuevo.');
+    rememberActive();
+    if([...sessions.keys()].some(key=>key!=='local'))throw Error('Desconecta las conexiones de servidor antes de restaurar la copia.');
+    if(JSON.stringify([await connections.list(),await connections.groups(),await credentials.read()])!==pending.current)throw Error('Las conexiones han cambiado. Selecciona el archivo de nuevo.');
+    return restorePackage(connections,credentials,pending.payload);
+  }));
   register('connections:save', profile => connections.save(profile));
   register('connections:forget-credential', async id => { await connections.validateIds([id]); await credentials.remove([id]); return true; });
   register('connections:credential-status', async id => ({saved:await credentials.has(id),available:safeStorage.isEncryptionAvailable()}));
@@ -244,6 +283,23 @@ app.whenReady().then(() => {
       CREATE TABLE tareas (id INTEGER PRIMARY KEY, proyecto_id INTEGER REFERENCES proyectos(id), titulo TEXT, completada INTEGER DEFAULT 0);
       INSERT INTO tareas VALUES (1, 1, 'Diseñar el espacio de trabajo', 1), (2, 1, 'Integrar el núcleo JDBC', 0);`);
     return activate(next, 'Laboratorio LQTAC');
+  }));
+  register('database:create', () => exclusive(async () => {
+    const chosen = await dialog.showSaveDialog(window, { title: 'Crear base de datos SQLite', defaultPath: 'nueva-base.sqlite', filters: [{ name: 'Base de datos SQLite', extensions: ['sqlite', 'db', 'sqlite3'] }] });
+    if (chosen.canceled || !chosen.filePath) return null;
+    const next = await SQLiteAdapter.open();
+    let file;
+    try {
+      file = await fs.open(chosen.filePath, 'wx', 0o600);
+      await file.writeFile(next.export());
+      await file.close(); file = null;
+    } catch (error) {
+      if (file) await file.close().catch(() => {});
+      next.close();
+      if (error.code === 'EEXIST') throw Error('Ya existe un archivo con ese nombre. Elige otro para crear la base sin sobrescribirlo.');
+      throw error;
+    }
+    return activate(next, path.basename(chosen.filePath));
   }));
   register('database:open', () => exclusive(async () => {
     const result = await dialog.showOpenDialog(window, { title: 'Abrir base SQLite (copia en memoria)', properties: ['openFile'], filters: [{ name: 'SQLite', extensions: ['db', 'sqlite', 'sqlite3'] }, { name: 'Todos los archivos', extensions: ['*'] }] });
@@ -479,7 +535,7 @@ app.whenReady().then(() => {
     } finally { worker.close(); }
   }));
   const createWindow = () => {
-    window = new BrowserWindow({ width: 1440, height: 940, minWidth: 1000, minHeight: 680, title: 'LQTAC Data Base', icon: path.join(__dirname, '../../assets/branding', process.platform === 'win32' ? 'app-icon.ico' : 'app-icon.png'), backgroundColor: '#eef2f7', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+    window = new BrowserWindow({ width: 1440, height: 940, minWidth: 1000, minHeight: 680, title: 'LQTAC dbFox', icon: path.join(__dirname, '../../assets/branding', process.platform === 'win32' ? 'app-icon.ico' : 'app-icon.png'), backgroundColor: '#eef2f7', webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     window.webContents.on('will-navigate', event => event.preventDefault());
     window.loadFile(entry);

@@ -8,7 +8,7 @@ class ClickHouseAdapter {
     const host = profile.host.includes(':') ? `[${profile.host}]` : profile.host;
     const adapter = new ClickHouseAdapter({ url: `${profile.tls ? 'https' : 'http'}://${host}:${profile.port}`, username: profile.username,
       password, database: profile.database || 'default', request_timeout: 30000, max_open_connections: 1,
-      session_id: randomUUID(), application: 'LQTAC Data Base', log: { level: ClickHouseLogLevel.OFF } });
+      session_id: randomUUID(), application: 'LQTAC dbFox', log: { level: ClickHouseLogLevel.OFF } });
     try { await adapter.client.command({ query: 'SELECT 1' }); return adapter; }
     catch (error) { adapter.close(); throw error; }
   }

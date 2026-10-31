@@ -1,4 +1,4 @@
-const defaults = Object.freeze({ sidebarWidth: 251, navigationHeight: 160, editorFraction: 0.45 });
+const defaults = Object.freeze({ sidebarWidth: 251, editorFraction: 0.45 });
 const storageKey = 'lqtac.panelLayout';
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
 
@@ -7,11 +7,8 @@ export function initPanelLayout() {
   const sidebar = document.querySelector('#sidebar');
   const sql = document.querySelector('#sql');
   const editor = document.querySelector('.query-editor');
-  const workspace = document.querySelector('#workspace-panel');
-  try { workspace.open = localStorage.getItem('lqtac.workspaceExpanded') === 'true'; } catch { /* Start collapsed. */ }
   const handles = {
     sidebarWidth: document.querySelector('#sidebar-splitter'),
-    navigationHeight: document.querySelector('#navigation-splitter'),
     editorFraction: document.querySelector('#editor-splitter')
   };
   let saved;
@@ -29,11 +26,6 @@ export function initPanelLayout() {
       const rail = document.querySelector('.rail').getBoundingClientRect().width;
       return { min: 210, max: Math.max(210, Math.min(600, innerWidth - rail - 7 - 600)) };
     }
-    if (key === 'navigationHeight') {
-      const style = getComputedStyle(sidebar);
-      const free = sidebar.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom) - document.querySelector('.sidebar-foot').offsetHeight - handles.navigationHeight.offsetHeight - document.querySelector('.sidebar>.brand').offsetHeight - workspace.querySelector('summary').offsetHeight;
-      return { min: 100, max: Math.max(100, free - 150) };
-    }
     const fixed = ['.editor-caption', '.results-header', '#editor-splitter','#result-tabs'].reduce((height, selector) => height + (document.querySelector(selector)?.getBoundingClientRect().height||0), 0);
     const available = Math.max(0, document.querySelector('#query-workspace').clientHeight - fixed);
     const minimum = Math.min(80, available / 2);
@@ -41,18 +33,16 @@ export function initPanelLayout() {
   }
   function actual(key) {
     if (key === 'sidebarWidth') return sidebar.getBoundingClientRect().width;
-    if (key === 'navigationHeight') return document.querySelector('#workspace-navigation').getBoundingClientRect().height;
     return editor.getBoundingClientRect().height;
   }
   function apply() {
     root.classList.toggle("explorer-collapsed",state.sidebarCollapsed);sidebar.inert=state.sidebarCollapsed;toggle.textContent=state.sidebarCollapsed?"☷ ›":"‹ ☷";toggle.title=state.sidebarCollapsed?"Mostrar explorador":"Ocultar explorador";toggle.setAttribute("aria-label",toggle.title);toggle.setAttribute("aria-expanded",String(!state.sidebarCollapsed));
-    handles.navigationHeight.classList.toggle('hidden', !workspace.open);
     for (const [key, handle] of Object.entries(handles)) {
-      if (key === 'editorFraction' && !sql.clientHeight || key==='navigationHeight' && state.sidebarCollapsed) continue;
+      if (key === 'editorFraction' && !sql.clientHeight) continue;
       const range = limits(key);
       const desired = key === 'editorFraction' ? state[key] * range.available : state[key];
       const value = Math.round(clamp(desired, range.min, range.max));
-      root.style.setProperty({ sidebarWidth: '--sidebar-width', navigationHeight: '--navigation-height', editorFraction: '--editor-height' }[key], `${value}px`);
+      root.style.setProperty({ sidebarWidth: '--sidebar-width', editorFraction: '--editor-height' }[key], `${value}px`);
       handle.setAttribute('aria-valuemin', String(Math.round(range.min)));
       handle.setAttribute('aria-valuemax', String(Math.round(range.max)));
       handle.setAttribute('aria-valuenow', String(value));
@@ -97,20 +87,19 @@ export function initPanelLayout() {
       if (![backward, forward, 'Home', 'End'].includes(event.key)) return;
       event.preventDefault();
       const range = limits(key);
-      const value = event.key === 'Home' ? range.min : event.key === 'End' ? range.max : actual(key) + (event.key === forward ? 1 : -1) * (key === 'navigationHeight' ? -1 : 1) * (event.shiftKey ? 40 : 10);
+      const value = event.key === 'Home' ? range.min : event.key === 'End' ? range.max : actual(key) + (event.key === forward ? 1 : -1) * (event.shiftKey ? 40 : 10);
       setSize(key, value); save();
     });
   }
   window.addEventListener('pointermove', event => {
     if (!drag || event.pointerId !== drag.pointerId) return;
     const coordinate = drag.key === 'sidebarWidth' ? event.clientX : event.clientY;
-    setSize(drag.key, drag.size + (coordinate - drag.coordinate) * (drag.key === 'navigationHeight' ? -1 : 1));
+    setSize(drag.key, drag.size + coordinate - drag.coordinate);
   });
   window.addEventListener('pointerup', event => { if (drag?.pointerId === event.pointerId) finish(); });
   window.addEventListener('pointercancel', () => finish(true));
   window.addEventListener('blur', () => finish(true));
   window.addEventListener('resize', apply);
-  workspace.addEventListener('toggle', () => { try { localStorage.setItem('lqtac.workspaceExpanded', String(workspace.open)); } catch { /* Session only. */ } apply(); });
   const observer = new ResizeObserver(apply);
   observer.observe(sidebar); observer.observe(sql); observer.observe(document.querySelector('#query-workspace'));
   observer.observe(document.querySelector('#result-tabs'));observer.observe(document.querySelector('.results-header'));

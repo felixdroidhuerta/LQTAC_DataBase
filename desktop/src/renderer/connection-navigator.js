@@ -31,7 +31,9 @@ export function createConnectionNavigator({ api, runTask, notify, onConnect, onD
   function context(event, items) {
     event.preventDefault(); clearMenu();
     for (const item of items) {
+      if (item.separator) { const line=el('div',undefined,'connection-menu-separator'); line.setAttribute('role','separator'); menu.append(line); continue; }
       const button = el('button', item.label); button.type = 'button'; button.setAttribute('role', 'menuitem');
+      if (item.danger) button.classList.add('connection-menu-danger');
       button.disabled = !!item.disabled;
       button.onclick = () => { clearMenu(); item.action(); };
       menu.append(button);
@@ -57,17 +59,20 @@ export function createConnectionNavigator({ api, runTask, notify, onConnect, onD
     if (!selected.has(id)) select(id);
     const ids = savedSelection(); const item = profile(id); const state = status(id);
     const actions = [{ label: 'Conectar', action: () => state?.connected ? onActivate(id) : onConnect(item) }];
-    actions.push({label:'Dashboards',action:()=>onDashboard?.({key:id,name:item?.name||state?.name||'Laboratorio local'})});
     if (state?.connected) actions.push({ label: 'Desconectar', action: () => onDisconnect(id) });
+    actions.push({label:'Dashboards',action:()=>onDashboard?.({key:id,name:item?.name||state?.name||'Laboratorio local'})});
     if (!local) {
+      actions.push({separator:true});
       actions.push({ label: 'Editar conexión', action: () => onEdit(item) });
+      actions.push({ label: 'Duplicar conexión', action: () => action(async () => { await api.duplicateConnection(id); notify('Conexión duplicada.'); }) });
       actions.push({ label: 'Cambiar o recordar contraseña', disabled: !!state?.connected, action: () => onCredentials(item) });
       actions.push({ label: 'Olvidar contraseña guardada', action: () => action(async () => { await api.forgetCredential(id); notify('Contraseña guardada eliminada.'); }) });
-      actions.push({ label: 'Duplicar conexión', action: () => action(async () => { await api.duplicateConnection(id); notify('Conexión duplicada.'); }) });
-      actions.push({ label: ids.length > 1 ? 'Borrar conexiones seleccionadas' : 'Borrar', action: () => onDelete(ids) });
+      actions.push({separator:true});
       actions.push({ label: 'Añadir a grupo…', action: () => assignmentDialog(ids) });
       actions.push({ label: ids.length > 1 ? 'Agrupar seleccionadas · Ctrl+Mayús+G' : 'Agrupar · Ctrl+Mayús+G', action: () => groupDialog(ids) });
       if (ids.some(value => overview.groups.some(group => group.connectionIds.includes(value)))) actions.push({ label: 'Sacar del grupo', action: () => action(() => api.moveConnections(ids, null)) });
+      actions.push({separator:true});
+      actions.push({ label: ids.length > 1 ? 'Borrar conexiones seleccionadas' : 'Borrar conexión', danger:true, action: () => onDelete(ids) });
     }
     context(event, actions);
   }

@@ -15,7 +15,6 @@ app.whenReady().then(async () => {
   const settled = () => js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
   const metrics = () => js(`({
     sidebar: document.querySelector('#sidebar').getBoundingClientRect().width,
-    navigation: document.querySelector('#workspace-navigation').getBoundingClientRect().height,
     editor: document.querySelector('.query-editor').getBoundingClientRect().height,
     results: document.querySelector('#results').clientHeight,
     noOverflow: document.body.scrollWidth <= innerWidth,
@@ -31,19 +30,15 @@ app.whenReady().then(async () => {
   }
   try {
     if (window.webContents.isLoading()) await new Promise(resolve => window.webContents.once('did-finish-load', resolve));
-    assert.equal(await js('document.querySelector("#workspace-panel").open'), false);
-    await js('document.querySelector("#workspace-panel").open = true');
-    await js(`document.querySelector('.nav[data-view=sql]').click()`);
+    assert.equal(await js('document.querySelector("#workspace-panel")'), null);
+    await js(`document.querySelector('.rail-button[data-view=sql]').click()`);
     await settled();
     const initial = await metrics();
     await drag('#sidebar-splitter', 85, 0);
     const wider = await metrics();
     assert.ok(wider.sidebar >= initial.sidebar + 70, 'Sidebar must follow horizontal drag');
     assert.ok(wider.noOverflow);
-    await drag('#navigation-splitter', 0, 65);
-    const shorter = await metrics();
-    assert.ok(shorter.navigation <= initial.navigation - 50, 'Navigation must follow vertical drag');
-    const beforeEditor = shorter.editor;
+    const beforeEditor = wider.editor;
     await drag('#editor-splitter', 0, 75);
     const taller = await metrics();
     assert.ok(taller.editor >= beforeEditor + 60, 'Editor must follow vertical drag');
@@ -51,12 +46,11 @@ app.whenReady().then(async () => {
     assert.ok(taller.saved.sidebarWidth > initial.sidebar);
     const restoredLoad = new Promise(resolve => window.webContents.once('did-finish-load', resolve));
     window.webContents.reload(); await restoredLoad;
-    await js(`document.querySelector('.nav[data-view=sql]').click()`); await settled();
+    await js(`document.querySelector('.rail-button[data-view=sql]').click()`); await settled();
     const restored = await metrics();
     assert.ok(Math.abs(restored.sidebar - taller.sidebar) <= 1);
-    assert.ok(Math.abs(restored.navigation - taller.navigation) <= 1);
     assert.ok(Math.abs(restored.editor - taller.editor) <= 2);
-    for (const selector of ['#sidebar-splitter', '#navigation-splitter', '#editor-splitter']) {
+    for (const selector of ['#sidebar-splitter', '#editor-splitter']) {
       await js(`document.querySelector('${selector}').dispatchEvent(new KeyboardEvent('keydown', {key:'End',bubbles:true,cancelable:true}))`);
       await settled();
       assert.equal(await js(`document.querySelector('${selector}').getAttribute('aria-valuenow')`), await js(`document.querySelector('${selector}').getAttribute('aria-valuemax')`));
@@ -68,13 +62,12 @@ app.whenReady().then(async () => {
     }
     const reset = await metrics();
     assert.ok(Math.abs(reset.sidebar - initial.sidebar) <= 1);
-    assert.ok(Math.abs(reset.navigation - initial.navigation) <= 1);
     window.setSize(1000, 680); await settled();
     const small = await metrics();
     assert.ok(small.noOverflow);
     assert.ok(small.editor >= 79 && small.results >= 79, 'Keep both editor and results usable');
     assert.equal(await js('document.body.classList.contains("resizing-panels")'), false);
-    console.log('PASS: three real pointer drags, layout persistence after reload, keyboard limits, reset and small-window bounds');
+    console.log('PASS: sidebar and editor resizing, layout persistence, keyboard limits, reset and small-window bounds');
     clearTimeout(timeout); app.exit(0);
   } catch (error) { console.error(error); clearTimeout(timeout); app.exit(1); }
 });

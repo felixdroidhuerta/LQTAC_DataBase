@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <title>LQTAC Data Base</title>
+  <title>LQTAC dbFox</title>
   <script src="theme-init.js"></script>
   <link rel="icon" type="image/png" href="../../../assets/branding/app-icon.png">
   <link rel="stylesheet" href="styles.css">
@@ -27,31 +27,26 @@
   <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
-  <aside class="rail"><div class="monogram"><img src="../../../assets/branding/app-icon.png" alt="LQTAC Data Base"></div><button class="rail-button active" data-view="home" title="Inicio">⌂</button><button class="rail-button" data-view="connections" title="Conexiones" aria-label="Conexiones">⇄</button><button class="rail-button" data-view="sql" title="Editor SQL">⌘</button><button class="rail-button" data-view="modules" title="Módulos">▦</button><span class="rail-bottom">0.1</span></aside>
+  <aside class="rail"><div class="monogram"><img src="../../../assets/branding/app-icon.png" alt="LQTAC dbFox"></div><button class="rail-button active" data-view="home" title="Inicio">⌂</button><button class="rail-button" data-view="connections" title="Conexiones" aria-label="Conexiones">⇄</button><button class="rail-button" data-view="sql" title="Editor SQL">⌘</button><button class="rail-button" data-view="modules" title="Módulos">▦</button><span class="rail-bottom">0.1</span></aside>
   <aside class="sidebar" id="sidebar">
-    <div class="brand" aria-label="LQTAC Data Base"><img class="brand-icon" src="../../../assets/branding/app-icon.png" alt=""><div class="brand-wordmark"><img class="brand-wordmark-light" src="../../../assets/branding/lqtac-data-base.png" alt="LQTAC Data Base"><img class="brand-wordmark-dark" src="../../../assets/branding/lqtac-data-base-white.png" alt="LQTAC Data Base"></div></div>
+    <div class="brand" aria-label="dbFox by LQTAC"><img class="brand-icon" src="../../../assets/branding/app-icon.png" alt=""><div class="brand-wordmark"><span class="brand-product">dbFox</span><span class="brand-signature"><span>by</span><span class="brand-logo-crop"><img class="brand-wordmark-light" src="../../../assets/branding/lqtac-data-base.png" alt="LQTAC"><img class="brand-wordmark-dark" src="../../../assets/branding/lqtac-data-base-white.png" alt="LQTAC"></span></span></div></div>
     <div class="sidebar-bottom">
-    <div class="section-title"><span>EXPLORADOR</span><div><button id="refresh-explorer" title="Actualizar conexiones y objetos de la sesión activa">↻</button><button id="new-profile-side" title="Nueva conexión" aria-label="Nueva conexión">＋</button><button id="open-side" title="Abrir archivo SQLite">▤</button></div></div>
+    <div class="section-title"><span>EXPLORADOR</span><div><button id="refresh-explorer" title="Actualizar conexiones y objetos de la sesión activa">↻</button><button id="new-profile-side" title="Nueva conexión" aria-label="Nueva conexión">＋</button><button id="open-side" title="Abrir archivo SQLite">▤</button><button id="connection-backup-side" title="Importar o exportar conexiones" aria-label="Importar o exportar conexiones">⋯</button></div></div>
     <label class="explorer-search"><input id="explorer-filter" type="search" placeholder="Filtrar bases y objetos…" aria-label="Filtrar bases de datos y objetos"></label>
     <div id="explorer" class="explorer-empty">Conecta con un servidor o abre una base SQLite para explorar sus tablas.</div>
     </div>
-    <div id="navigation-splitter" class="panel-splitter horizontal-splitter hidden" role="separator" aria-orientation="horizontal" aria-label="Ajustar altura de espacio de trabajo y explorador" aria-controls="workspace-navigation" tabindex="0" title="Arrastra para repartir el explorador y el espacio de trabajo. Doble clic para restablecer."></div>
-    <details id="workspace-panel" class="sidebar-workspace"><summary>ESPACIO DE TRABAJO</summary><div class="sidebar-top" id="workspace-navigation">
-      <button class="nav active" data-view="home">⌂ <span>Inicio</span></button>
-      <button class="nav" data-view="sql">⌘ <span>Editor SQL</span><kbd>Ctrl N</kbd></button>
-      <button class="nav" data-view="modules">▦ <span>Módulos</span></button>
-    </div></details>
+    <button id="open-about" class="sidebar-about" type="button"><span aria-hidden="true">ⓘ</span> Acerca de…</button>
     <div class="sidebar-foot"><span class="dot" id="sessions-dot"></span> Sesiones abiertas <span id="sessions-count">0</span></div>
   </aside>
   <div id="sidebar-splitter" class="panel-splitter vertical-splitter" role="separator" aria-orientation="vertical" aria-label="Ajustar ancho del explorador" aria-controls="sidebar" tabindex="0" title="Arrastra para ajustar el ancho del explorador. Doble clic para restablecer."></div>
   <main>
-    <header class="topbar"><div>Workspace <span>/</span> <strong id="breadcrumb">Inicio</strong></div><div class="workspace-actions"><span class="badge" title="Versión de escritorio en desarrollo">DESKTOP PREVIEW</span><div class="mini-tools" role="toolbar" aria-label="Apariencia del espacio de trabajo"><button id="toggle-theme" class="mini-tool" aria-label="Cambiar modo oscuro" data-hint="Modo oscuro · Alterna el tema y recuerda tu preferencia">◐</button></div></div></header>
+    <header class="topbar"><div>Workspace <span>/</span> <strong id="breadcrumb">Inicio</strong></div><div class="workspace-actions"><div class="mini-tools" role="toolbar" aria-label="Apariencia y ayuda"><button id="open-help" class="mini-tool" aria-label="Abrir manual de usuario" data-hint="Ayuda · Abrir manual de usuario">?</button><button id="toggle-theme" class="mini-tool" aria-label="Cambiar modo oscuro" data-hint="Modo oscuro · Alterna el tema y recuerda tu preferencia">◐</button></div></div></header>
     <div class="tabs"><button data-view="home" class="tab active">⌂ &nbsp; Inicio</button><div id="query-tabs"></div><button id="new-query" title="Nueva consulta">＋</button><div id="designer-tab" class="hidden"><button class="tab" data-view="table-designer" id="designer-tab-title">Estructura</button><button id="close-designer" title="Cerrar editor de tabla" aria-label="Cerrar editor de tabla">×</button></div></div>
     <section id="home" class="view">
       <div class="eyebrow">TU ESPACIO. TUS DATOS.</div>
       <h1>Todo empieza con una conexión<span>.</span></h1>
       <p class="intro">Explora tus bases de datos, escribe consultas y construye desde un único espacio de trabajo.</p>
-      <div class="home-actions"><button id="new-connection-home" class="primary">＋ &nbsp; Nueva conexión</button><button id="open-home" class="secondary">Abrir archivo SQLite</button><button id="demo-home" class="secondary">Probar el laboratorio ↗</button></div>
+      <div class="home-actions"><button id="new-connection-home" class="primary">＋ &nbsp; Nueva conexión</button><button id="create-sqlite-home" class="secondary">＋ &nbsp; Nueva base SQLite</button><button id="open-home" class="secondary">Abrir archivo SQLite</button><button id="demo-home" class="secondary">Probar el laboratorio ↗</button></div>
       <div class="section-heading"><h2>Herramientas de trabajo</h2><span>Un entorno, módulos independientes</span></div>
       <div id="module-cards" class="cards"></div>
       <article class="lab"><div class="lab-icon">⌘</div><div><span class="eyebrow">LABORATORIO LQTAC</span><h2>Un lugar para experimentar.</h2><p>Una base SQLite de ejemplo, con proyectos y tareas, lista para tus primeras consultas.</p></div><button id="demo-lab" class="secondary">Abrir laboratorio →</button></article>
@@ -61,7 +56,7 @@
       <div class="eyebrow">SERVIDORES Y BASES DE DATOS</div>
       <h1>Tus conexiones<span>.</span></h1>
       <p class="intro">Guarda un perfil con el servidor, el puerto, el usuario y la base de datos a la que quieres acceder.</p>
-      <div class="home-actions"><button id="new-connection" class="primary">＋ &nbsp; Nueva conexión</button></div>
+      <div class="home-actions"><button id="new-connection" class="primary">＋ &nbsp; Nueva conexión</button><button id="create-sqlite-connections" class="secondary">＋ &nbsp; Nueva base SQLite</button><button id="export-connections" class="secondary">Exportar conexiones</button><button id="import-connections" class="secondary">Importar conexiones</button></div>
       <div id="connection-profiles" class="profile-list"></div>
       <div class="note"><span>◈</span><p><strong>Conexiones a servidor</strong><br>Todos los motores del selector disponen de controlador. Configura el servidor y pulsa «Conectar» para autenticarte.</p></div>
     </section>
@@ -87,10 +82,12 @@
       <div class="designer-footer">Los cambios del formulario están pendientes hasta revisar y aplicar el SQL en el servidor. Los atributos avanzados no editados permanecen en su definición original.</div>
     </section>
     <section id="modules" class="view hidden"><div class="eyebrow">ARQUITECTURA MODULAR</div><h1>Tu caja de herramientas<span>.</span></h1><p class="intro">Cada módulo tiene una responsabilidad propia. Esta es la disponibilidad real de esta versión.</p><div id="module-list" class="module-list"></div></section>
-    <footer><span><i class="dot" id="status-dot"></i> <span id="status">Sin conexión</span></span><span>LQTAC Data Base <b>0.2.2</b></span></footer>
+    <footer><span><i class="dot" id="status-dot"></i> <span id="status">Sin conexión</span></span><span>LQTAC dbFox <b>0.2.4</b></span></footer>
   </main>
   <div id="toast" role="status" class="toast hidden"></div>
   <div id="connection-context-menu" class="connection-context hidden" role="menu" aria-label="Acciones de conexiones"></div>
+  <dialog id="about-dialog" aria-labelledby="about-heading"><div class="about-banner"><img src="../../../assets/branding/app-icon.png" alt=""><div><h2 id="about-heading">dbFox</h2><div class="about-by">by <span class="about-lqtac"><img src="../../../assets/branding/lqtac-data-base-white.png" alt="LQTAC"></span></div></div></div><div class="about-content"><div class="about-version">LQTAC dbFox · versión <span id="about-version">—</span></div><p>Un espacio de trabajo para explorar bases de datos, crear consultas y construir dashboards.</p><p>Compatible con MySQL, MariaDB, PostgreSQL, SQL Server, Oracle, ClickHouse, MongoDB y SQLite.</p><p class="about-manual-note">Incluye el manual de usuario de LQTAC dbFox, edición 0.2.4.</p><div class="form-actions"><button id="about-manual" class="secondary" type="button">Abrir manual</button><button id="close-about" class="primary" type="button">Cerrar</button></div></div></dialog>
+  <dialog id="connection-backup-dialog"><form id="connection-backup-form"><h2 id="connection-backup-title"></h2><p id="connection-backup-description"></p><label class="designer-field">Contraseña del archivo<input id="connection-backup-password" type="password" minlength="8" maxlength="1024" required autocomplete="new-password"></label><label id="connection-backup-confirm-label" class="designer-field">Repite la contraseña<input id="connection-backup-confirm" type="password" minlength="8" maxlength="1024" autocomplete="new-password"></label><p id="connection-backup-error" role="alert"></p><div class="form-actions"><button id="connection-backup-cancel" type="button" class="secondary">Cancelar</button><button id="connection-backup-submit" type="submit" class="primary">Continuar</button></div></form></dialog>
   <dialog id="connection-group-dialog"><form id="connection-group-form"><h2>Agrupar conexiones</h2><p id="connection-group-summary"></p><label class="designer-field">Nombre del grupo<input id="connection-group-name" required maxlength="80" autocomplete="off"></label><p id="connection-group-error" role="alert"></p><div class="form-actions"><button type="button" id="cancel-connection-group" class="secondary">Cancelar</button><button type="submit" class="primary">Crear grupo</button></div></form></dialog>
   <dialog id="assign-group-dialog"><form id="assign-group-form"><h2>Añadir conexiones a grupo</h2><label class="designer-field">Grupo<select id="assign-group-target"></select></label><p id="assign-group-error" role="alert"></p><div class="form-actions"><button type="button" id="cancel-assign-group" class="secondary">Cancelar</button><button type="submit" class="primary">Mover</button></div></form></dialog>
   <dialog id="trigger-editor-dialog">

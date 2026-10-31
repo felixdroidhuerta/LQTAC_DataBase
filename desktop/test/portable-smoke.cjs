@@ -3,7 +3,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const net = require('node:net');
 const { spawn } = require('node:child_process');
-const directory = path.resolve(__dirname, '../../..', `LQTAC-DataBase-${require('../package.json').version}-win-${process.arch}-portable`);
+const directory = path.resolve(__dirname, '../../..', `LQTAC-dbFox-${require('../package.json').version}-win-${process.arch}-portable`);
 const data = path.join(directory, 'Data');
 let child, socket;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -12,7 +12,7 @@ async function launch() {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = server.address().port;
   await new Promise(resolve => server.close(resolve));
-  child = spawn(path.join(directory, 'LQTAC Data Base.exe'), [`--remote-debugging-port=${port}`, '--disable-features=CalculateNativeWinOcclusion'], { windowsHide: true, stdio: 'ignore' });
+  child = spawn(path.join(directory, 'LQTAC dbFox.exe'), [`--remote-debugging-port=${port}`, '--disable-features=CalculateNativeWinOcclusion'], { windowsHide: true, stdio: 'ignore' });
   let target;
   for (let i = 0; i < 100; i++) {
     try { target = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(item => item.type === 'page' && item.url.endsWith('index.html')); } catch {}
@@ -52,7 +52,7 @@ async function run() {
     assert.equal(await evaluate('document.querySelector(".brand img").naturalWidth > 0'), true);
     assert.deepEqual(await evaluate('window.lqtac.listConnections()'), []);
     assert.equal(await evaluate('document.querySelector("footer b").textContent'),require('../package.json').version);
-    assert.ok((await fs.stat(path.join(directory,'Manual-de-usuario-0.2.0.pdf'))).size>1000);
+    assert.ok((await fs.stat(path.join(directory,'Manual-de-usuario-0.2.4.pdf'))).size>1000);
     assert.equal(await evaluate('typeof window.lqtac.prepareDashboardImport'), 'function');
     assert.equal(await evaluate('typeof window.lqtac.exportDashboard'), 'function');
     assert.equal(await evaluate('document.querySelector("#result-limit option[value=" + CSS.escape("0") + "]")?.textContent'), 'Sin límite');

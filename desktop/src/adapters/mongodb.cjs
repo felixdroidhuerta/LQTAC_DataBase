@@ -23,7 +23,7 @@ class MongoDBAdapter {
     const client = new MongoClient(`mongodb://${host}:${profile.port}`, {
       ...(profile.username ? { auth: { username: profile.username, password }, authSource: profile.authSource || 'admin' } : {}), tls: profile.tls === true,
       serverSelectionTimeoutMS: 10000, connectTimeoutMS: 10000, timeoutMS: 30000, retryWrites: false, maxPoolSize: 1,
-      appName: 'LQTAC Data Base'
+      appName: 'LQTAC dbFox'
     });
     const adapter = new MongoDBAdapter(client, profile.database || 'test');
     try { await client.connect(); await client.db(adapter.database).command({ ping: 1 }); return adapter; }

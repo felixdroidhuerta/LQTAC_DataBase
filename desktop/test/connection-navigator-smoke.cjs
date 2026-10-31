@@ -32,7 +32,7 @@ app.whenReady().then(async () => {
     await js(`document.querySelector('#refresh-explorer').click()`);
     await until("document.querySelectorAll('.connection-row').length===3");
     assert.equal(await js('document.querySelectorAll(".connection-power.power-off").length'), 3);
-    assert.equal(await js('document.querySelector("#workspace-panel").open'), false);
+    assert.equal(await js('document.querySelector("#workspace-panel")'), null);
     assert.equal(await js('document.querySelectorAll(".nav[data-view=connections]").length'), 0);
     assert.equal(await js('document.querySelectorAll(".rail-button[data-view=connections]").length'), 1);
     await js(`document.querySelector(${JSON.stringify(row(a.id))}).click();document.querySelector(${JSON.stringify(row(b.id))}).dispatchEvent(new MouseEvent('click',{ctrlKey:true,bubbles:true}));document.dispatchEvent(new KeyboardEvent('keydown',{key:'G',code:'KeyG',ctrlKey:true,shiftKey:true,bubbles:true,cancelable:true}))`);
@@ -44,6 +44,7 @@ app.whenReady().then(async () => {
     await openMenu(a.id);
     const labels = await js(`[...document.querySelectorAll('#connection-context-menu button')].map(button=>button.textContent)`);
     assert.ok(labels.includes('Conectar') && labels.includes('Añadir a grupo…') && labels.some(label=>label.startsWith('Agrupar')));
+    assert.equal(await js('document.querySelectorAll("#connection-context-menu [role=separator]").length'),3);
     await js(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
     await drag(b.id, '.ungrouped-connections');
     await until(`document.querySelector('.ungrouped-connections ${row(b.id)}')`);
@@ -54,14 +55,12 @@ app.whenReady().then(async () => {
     await js(`document.querySelector('#assign-group-target').value=${JSON.stringify(group.id)};document.querySelector('#assign-group-form').requestSubmit()`);
     await until("document.querySelectorAll('.connection-group .connection-row').length===3");
     await js('window.confirm=()=>true;void 0');
-    await openMenu(c.id); await menuClick('Borrar');
+    await openMenu(c.id); await menuClick('Borrar conexión');
     await until("document.querySelectorAll('.connection-row').length===2");
     assert.equal(JSON.parse(readFileSync(join(app.getPath('userData'),'connections-trash.json'),'utf8'))[0].id, c.id);
-    await js(`document.querySelector('#workspace-panel>summary').click()`);
-    await until("localStorage.getItem('lqtac.workspaceExpanded')==='true'");
     const reloaded = new Promise(resolve => window.webContents.once('did-finish-load', resolve)); window.webContents.reload(); await reloaded;
     await until("document.querySelectorAll('.connection-group .connection-row').length===2");
-    assert.equal(await js('document.querySelector("#workspace-panel").open'), true);
+    assert.equal(await js('!!document.querySelector("#open-about")'), true);
     await js('window.confirm=()=>true;void 0');
     console.log('Navigator: rail, collapsed workspace, multi-selection, groups, drag in/out, menu assignment, archive and reload passed');
     await connect(a.id); await connect(b.id);

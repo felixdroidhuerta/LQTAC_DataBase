@@ -1,8 +1,8 @@
 {
   "name": "lqtac-database",
-  "version": "0.2.2",
+  "version": "0.2.4",
   "private": true,
-  "description": "LQTAC Data Base — espacio de trabajo modular para bases de datos",
+  "description": "LQTAC dbFox — espacio de trabajo modular para bases de datos",
   "main": "src/main.cjs",
   "scripts": {
     "build:portable": "node scripts/build-portable.cjs",
@@ -10,9 +10,11 @@
     "start": "electron .",
     "test": "node --test test/*.test.cjs",
     "test:desktop": "electron test/desktop-smoke.cjs",
+    "test:sqlite-create": "electron test/sqlite-create-smoke.cjs",
     "test:layout": "electron test/layout-smoke.cjs",
     "test:designer": "electron test/table-designer-smoke.cjs",
     "test:connections": "electron test/connection-navigator-smoke.cjs",
+    "test:connection-transfer": "electron test/connection-transfer-smoke.cjs",
     "test:syntax": "electron test/syntax-smoke.cjs",
     "test:engines": "electron test/extra-engines-smoke.cjs",
     "test:sql-engines": "electron test/sql-engines-smoke.cjs",

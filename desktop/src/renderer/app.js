@@ -18,6 +18,11 @@ import {initDashboard} from './dashboard.js';
 
 const $ = selector => document.querySelector(selector);
 const api = window.lqtac;
+const openManual = async () => { try { if(!api) throw Error('Abre la aplicación de escritorio para consultar el manual.'); await api.openManual(); } catch(error) { notify(error.message); } };
+$('#open-help').onclick = openManual;
+$('#about-manual').onclick = openManual;
+$('#open-about').onclick = async () => { const dialog=$('#about-dialog'); if(dialog.open)return; $('#about-version').textContent='—'; dialog.showModal(); try { if(api) $('#about-version').textContent=(await api.appInfo()).version; } catch(error) { notify(error.message); } };
+$('#close-about').onclick = () => $('#about-dialog').close();
 initEditorIndent();
 initSettings({api,notify});
 let connection = null;
@@ -44,7 +49,7 @@ const queryTools = initQueryTools({api,getConnection:()=>connection,runSelection
 const dashboard=initDashboard({api,notify,show,getOpenQueries:async()=>{const snapshots=await api.dashboardQueries(tabs.map(t=>t.id));return tabs.map(t=>({...t,snapshot:snapshots.find(s=>s.id===t.id)}));},getConnection:()=>connection,getResults:()=>{const result=resultsGrid.dashboardResults(),tab=tabs.find(t=>t.id===activeTab);if(result&&tab)result.results.forEach((r,i)=>r.label=tab.title+(r.customLabel?' · '+r.label:result.results.length>1?' · Respuesta '+(i+1):''));return result;}});
 const objectEditor=createObjectEditor({api,runTask:action=>task(action),getConnection:()=>connection,onChange:async()=>{autocomplete.invalidate();updateConnection(await api.catalog());},notify});
 initPanelLayout();
-const defaultSql = '-- Tu primera consulta en LQTAC Data Base\nSELECT * FROM proyectos;';
+const defaultSql = '-- Tu primera consulta en LQTAC dbFox\nSELECT * FROM proyectos;';
 let tabs;
 try { tabs = JSON.parse(localStorage.getItem('lqtac.queries')); } catch { /* Start with a fresh draft if local storage is unavailable. */ }
 if (!Array.isArray(tabs) || !tabs.every(t => t && typeof t.id === 'string' && typeof t.sql === 'string')) tabs = [{ id: crypto.randomUUID(), sql: defaultSql }];
@@ -243,8 +248,9 @@ async function performConnection(kind) {
     $('#results').replaceChildren(element('div', 'Conexión abierta. Ejecuta una consulta para ver sus resultados.', 'result-placeholder'));
     $('#query-info').textContent = 'Listo para ejecutar';
     if (kind === 'demo') newQuery(defaultSql);
+    else if (kind === 'create') newQuery('-- Base SQLite nueva. Usa Guardar copia para conservar los cambios.\n');
     else newQuery('-- Base abierta como copia en memoria\nSELECT name, type FROM sqlite_master ORDER BY name;');
-    notify(`${data.name}: lista para trabajar`);
+    notify(kind === 'create' ? `${data.name}: creada. Usa Guardar copia para conservar los cambios posteriores.` : `${data.name}: lista para trabajar`);
   });
 }
 async function run(selectionOnly=false,all=false) {
@@ -307,6 +313,7 @@ for (const module of modules) {
 }
 for (const button of document.querySelectorAll('[data-view]')) button.addEventListener('click', () => {if(button.dataset.view!=='dashboard')show(button.dataset.view);});
 for (const id of ['#open-home', '#open-side']) $(id).onclick = () => connect('open');
+for (const id of ['#create-sqlite-home', '#create-sqlite-connections']) $(id).onclick = () => connect('create');
 for (const id of ['#demo-home', '#demo-lab']) $(id).onclick = () => connect('demo');
 $('#cancel-switch').onclick = () => { pendingSwitch = null; $('#switch-dialog').close(); };
 $('#confirm-switch').onclick = () => { if (!pendingSwitch) return; const kind = pendingSwitch; pendingSwitch = null; $('#switch-dialog').close(); if (kind?.profile) requestRemote(kind.profile); else performConnection(kind); };
@@ -391,6 +398,46 @@ async function loadProfiles() {
   } catch (error) { root.replaceChildren(element('p', `No se pudieron cargar las conexiones: ${error.message}`, 'error')); }
 }
 for (const id of ['#new-connection', '#new-connection-home']) $(id).onclick = () => { show('connections'); editProfile(); };
+$('#connection-backup-side').onclick = () => { show('connections'); loadProfiles(); };
+let connectionBackupMode = null;
+function openConnectionBackup(mode) {
+  if (busy || !api) return;
+  connectionBackupMode=mode;
+  const exporting=mode==='export';
+  $('#connection-backup-title').textContent=exporting?'Exportar conexiones':'Importar conexiones';
+  $('#connection-backup-description').textContent=exporting?'La copia incluirá conexiones, grupos y contraseñas guardadas. Elige una contraseña para cifrar el archivo .lqtdb. Guárdala: la necesitarás para restaurarlo.':'Introduce la contraseña de la copia y selecciona el archivo .lqtdb. Después podrás revisar el resumen antes de restaurar.';
+  $('#connection-backup-password').value=''; $('#connection-backup-confirm').value='';
+  $('#connection-backup-confirm-label').hidden=!exporting;
+  $('#connection-backup-confirm').required=exporting;
+  $('#connection-backup-error').textContent='';
+  $('#connection-backup-dialog').showModal(); $('#connection-backup-password').focus();
+}
+$('#export-connections').onclick=()=>openConnectionBackup('export');
+$('#import-connections').onclick=()=>openConnectionBackup('import');
+$('#connection-backup-cancel').onclick=()=>$('#connection-backup-dialog').close();
+$('#connection-backup-dialog').addEventListener('cancel',event=>{if(busy)event.preventDefault();});
+$('#connection-backup-dialog').addEventListener('close',()=>{ $('#connection-backup-password').value=''; $('#connection-backup-confirm').value=''; connectionBackupMode=null; });
+$('#connection-backup-form').onsubmit=async event=>{
+  event.preventDefault(); if(busy || !event.target.reportValidity())return;
+  const mode=connectionBackupMode, password=$('#connection-backup-password').value;
+  if(mode==='export' && password!==$('#connection-backup-confirm').value){$('#connection-backup-error').textContent='Las contraseñas no coinciden.';return;}
+  const buttons=[...event.target.querySelectorAll('button')]; buttons.forEach(button=>button.disabled=true); busy=true;
+  $('#connection-backup-error').textContent='';
+  try {
+    if(mode==='export') {
+      const result=await api.exportConnections(password);
+      if(result){$('#connection-backup-dialog').close();notify(`Copia exportada: ${result.profiles} conexiones y ${result.groups} grupos.`);}
+    } else {
+      const result=await api.prepareConnectionImport(password);
+      if(!result)return;
+      if(!confirm(`La copia contiene ${result.profiles} conexiones, ${result.groups} grupos y ${result.passwords} contraseñas guardadas.\n\nSe sustituirá toda la configuración actual de conexiones y grupos. Desconecta primero los servidores. Se conservará una copia local de la configuración anterior.\n\n¿Restaurar esta copia?`)){await api.cancelConnectionImport(result.token);return;}
+      await api.finishConnectionImport(result.token);
+      $('#connection-backup-dialog').close(); await loadProfiles();
+      notify(`Copia restaurada: ${result.profiles} conexiones y ${result.groups} grupos.`);
+    }
+  } catch(error){$('#connection-backup-error').textContent=error.message;}
+  finally{busy=false;buttons.forEach(button=>button.disabled=false);renderDatabasePicker();}
+};
 $('#new-profile-side').onclick = () => editProfile();
 $('#cancel-profile').onclick = () => $('#connection-dialog').close();
 profileForm.elements.engine.onchange = () => { profileForm.elements.port.value = defaultPorts[profileForm.elements.engine.value]; updateProfileHints(); };
