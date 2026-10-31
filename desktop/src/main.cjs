@@ -131,8 +131,8 @@ app.whenReady().then(() => {
   register('dashboards:queries',ids=>dashboardQueries.list(ids));
   register('dashboards:query-capture',requests=>dashboardQueries.capture(requests));
   let pendingDashboardImport=null;
-  register('dashboards:export',async request=>{const board=request?.id?await dashboards.read(request.id):request?.board;const pkg=await exportPackage(board,app.getVersion());const name='LQTAC-'+pkg.board.name.replace(/[<>:"/\\|?*\x00-\x1f]/g,'_')+'.lqtac-dashboard';const selected=await dialog.showSaveDialog(window,{title:'Exportar dashboard con sus datos y consultas',defaultPath:name,filters:[{name:'Dashboard LQTAC dbFox',extensions:['lqtac-dashboard']}]});if(selected.canceled)return null;await fs.writeFile(selected.filePath,JSON.stringify(pkg),{encoding:'utf8',mode:0o600});return {name:path.basename(selected.filePath)};});
-  register('dashboards:import-prepare',async()=>{const selected=await dialog.showOpenDialog(window,{title:'Importar dashboard LQTAC dbFox',properties:['openFile'],filters:[{name:'Dashboard LQTAC dbFox',extensions:['lqtac-dashboard','json']}]});if(selected.canceled)return null;const file=selected.filePaths[0];if((await fs.stat(file)).size>24000000)throw Error('El archivo supera 24 MB.');const pkg=await parsePackage(await fs.readFile(file,'utf8')),token=randomUUID();pendingDashboardImport={token,pkg,expires:Date.now()+900000};return {token,name:pkg.board.name,datasets:pkg.board.datasets.length,widgets:pkg.board.widgets.length,connections:pkg.connections};});
+  register('dashboards:export',async request=>{const board=request?.id?await dashboards.read(request.id):request?.board;const pkg=await exportPackage(board,app.getVersion());const name='LQTAC-'+pkg.board.name.replace(/[<>:"/\\|?*\x00-\x1f]/g,'_')+'.foxpanel';const selected=await dialog.showSaveDialog(window,{title:'Exportar dashboard con sus datos y consultas',defaultPath:name,filters:[{name:'Dashboard dbFox',extensions:['foxpanel']}]});if(selected.canceled)return null;await fs.writeFile(selected.filePath,JSON.stringify(pkg),{encoding:'utf8',mode:0o600});return {name:path.basename(selected.filePath)};});
+  register('dashboards:import-prepare',async()=>{const selected=await dialog.showOpenDialog(window,{title:'Importar dashboard LQTAC dbFox',properties:['openFile'],filters:[{name:'Dashboards compatibles',extensions:['foxpanel','lqtac-dashboard','json']}]});if(selected.canceled)return null;const file=selected.filePaths[0];if((await fs.stat(file)).size>24000000)throw Error('El archivo supera 24 MB.');const pkg=await parsePackage(await fs.readFile(file,'utf8')),token=randomUUID();pendingDashboardImport={token,pkg,expires:Date.now()+900000};return {token,name:pkg.board.name,datasets:pkg.board.datasets.length,widgets:pkg.board.widgets.length,connections:pkg.connections};});
   register('dashboards:import-cancel',token=>{if(pendingDashboardImport?.token===token)pendingDashboardImport=null;});
   register('dashboards:import-finish',async(token,options)=>{const pending=pendingDashboardImport;if(!pending||pending.token!==token||pending.expires<Date.now())throw Error('La importación ha caducado. Selecciona el archivo de nuevo.');if(pending.processing)throw Error('Esta importación ya está en curso.');pending.processing=true;try{const board=await importPackage(pending.pkg,options,await connections.list());const saved=await dashboards.save(board);if(pendingDashboardImport===pending)pendingDashboardImport=null;return {id:saved.id,name:saved.name};}finally{pending.processing=false;}});
   register('dashboards:query-check',(sql,engine)=>{refreshQuery(sql,engine);return true;});
@@ -166,10 +166,10 @@ app.whenReady().then(() => {
     return {...result,...databaseStatus()};
   }));
   register('settings:get', () => settings.get());
-  register('app:info', () => ({ version: app.getVersion(), manualVersion: '0.2.4' }));
+  register('app:info', () => ({ version: app.getVersion(), manualVersion: '0.2.5' }));
   register('app:manual', async () => {
     const portable = require('node:fs').existsSync(path.join(path.dirname(process.execPath), 'portable.json'));
-    const file = portable ? path.join(path.dirname(process.execPath), 'Manual-de-usuario-0.2.4.pdf') : path.resolve(__dirname, '../../output/pdf/LQTAC_dbFox_Manual_de_usuario_0.2.4.pdf');
+    const file = portable ? path.join(path.dirname(process.execPath), 'Manual-de-usuario-0.2.5.pdf') : path.resolve(__dirname, '../../output/pdf/LQTAC_dbFox_Manual_de_usuario_0.2.5.pdf');
     try { await fs.access(file); } catch { throw Error('No se encuentra el manual de usuario en esta instalación.'); }
     const error = await shell.openPath(file);
     if (error) throw Error('No se pudo abrir el manual: ' + error);
@@ -202,14 +202,14 @@ app.whenReady().then(() => {
     const profiles=await connections.list(), groups=await connections.groups(), passwords=[];
     for (const profile of profiles) if (await credentials.has(profile.id)) passwords.push({id:profile.id,password:await credentials.get(profile.id)});
     const content=await encryptPackage({format:'LQTAC Connections',version:1,profiles,groups,passwords},passphrase);
-    const chosen=await dialog.showSaveDialog(window,{title:'Exportar conexiones y grupos',defaultPath:'LQTAC-conexiones.lqtdb',filters:[{name:'Copia de conexiones LQTAC',extensions:['lqtdb']}]});
+    const chosen=await dialog.showSaveDialog(window,{title:'Exportar conexiones y grupos',defaultPath:'dbFox-conexiones.foxdb',filters:[{name:'Conexiones dbFox',extensions:['foxdb']}]});
     if(chosen.canceled)return null;
     await fs.writeFile(chosen.filePath,content,{mode:0o600});
     return {profiles:profiles.length,groups:groups.length,passwords:passwords.length};
   }, {allowPending:true}));
   register('connections:import-prepare', async passphrase => {
     pendingConnectionImport=null;
-    const chosen=await dialog.showOpenDialog(window,{title:'Importar conexiones y grupos',properties:['openFile'],filters:[{name:'Copia de conexiones LQTAC',extensions:['lqtdb']}]});
+    const chosen=await dialog.showOpenDialog(window,{title:'Importar conexiones y grupos',properties:['openFile'],filters:[{name:'Conexiones compatibles',extensions:['foxdb','lqtdb']}]});
     if(chosen.canceled)return null;
     const file=chosen.filePaths[0]; if((await fs.stat(file)).size>MAX_CONNECTION_BACKUP*2)throw Error('El archivo supera el tamaño permitido.');
     const payload=await decryptPackage(await fs.readFile(file,'utf8'),passphrase), token=randomUUID();

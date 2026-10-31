@@ -29,7 +29,7 @@ for page in PAGES:
         'Elegir el motor correcto': {
             'SQLite': 'Crea una base local vacía o abre un archivo o el laboratorio, sin servidor. Los cambios se mantienen en memoria hasta pulsar Guardar copia.'},
         'Conexiones, grupos y objetos': {
-            'Menú de una conexión': 'El botón derecho permite conectar, editar, duplicar, gestionar la contraseña, agrupar y borrar. En Conexiones puedes exportar o restaurar perfiles y grupos mediante un archivo .lqtdb cifrado.'},
+            'Menú de una conexión': 'El botón derecho permite conectar, editar, duplicar, gestionar la contraseña, agrupar y borrar. En Conexiones puedes exportar o restaurar perfiles y grupos mediante .foxdb cifrado; también puedes importar archivos .lqtdb anteriores.'},
         'Practicar con el laboratorio': {
             '3. Edita sin escribir en un servidor': 'Haz doble clic o pulsa F2 en una celda editable y escribe En revisión. Enter deja el valor pendiente. Arrastra el tirador para copiarlo; pulsa Descartar o Aplicar cambios.'},
         'Modificar registros y aplicar': {

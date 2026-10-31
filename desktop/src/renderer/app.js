@@ -405,7 +405,7 @@ function openConnectionBackup(mode) {
   connectionBackupMode=mode;
   const exporting=mode==='export';
   $('#connection-backup-title').textContent=exporting?'Exportar conexiones':'Importar conexiones';
-  $('#connection-backup-description').textContent=exporting?'La copia incluirá conexiones, grupos y contraseñas guardadas. Elige una contraseña para cifrar el archivo .lqtdb. Guárdala: la necesitarás para restaurarlo.':'Introduce la contraseña de la copia y selecciona el archivo .lqtdb. Después podrás revisar el resumen antes de restaurar.';
+  $('#connection-backup-description').textContent=exporting?'La copia incluirá conexiones, grupos y contraseñas guardadas. Elige una contraseña para cifrar el archivo .foxdb. Guárdala: la necesitarás para restaurarlo.':'Introduce la contraseña de la copia y selecciona el archivo .foxdb o .lqtdb. Después podrás revisar el resumen antes de restaurar.';
   $('#connection-backup-password').value=''; $('#connection-backup-confirm').value='';
   $('#connection-backup-confirm-label').hidden=!exporting;
   $('#connection-backup-confirm').required=exporting;

@@ -52,7 +52,7 @@ async function run() {
     assert.equal(await evaluate('document.querySelector(".brand img").naturalWidth > 0'), true);
     assert.deepEqual(await evaluate('window.lqtac.listConnections()'), []);
     assert.equal(await evaluate('document.querySelector("footer b").textContent'),require('../package.json').version);
-    assert.ok((await fs.stat(path.join(directory,'Manual-de-usuario-0.2.4.pdf'))).size>1000);
+    assert.ok((await fs.stat(path.join(directory,'Manual-de-usuario-0.2.5.pdf'))).size>1000);
     assert.equal(await evaluate('typeof window.lqtac.prepareDashboardImport'), 'function');
     assert.equal(await evaluate('typeof window.lqtac.exportDashboard'), 'function');
     assert.equal(await evaluate('document.querySelector("#result-limit option[value=" + CSS.escape("0") + "]")?.textContent'), 'Sin límite');

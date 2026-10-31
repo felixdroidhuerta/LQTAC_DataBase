@@ -13,9 +13,9 @@ app.whenReady().then(async()=>{const w=BrowserWindow.getAllWindows()[0];w.webCon
  assert.equal(await js('document.querySelector("#about-dialog .about-banner img").naturalWidth > 0'),true);
  await js('window.lqtac.appInfo().then(x=>document.querySelector("#about-version").textContent=x.version)');
  assert.equal(await js('document.querySelector("#about-version").textContent'),app.getVersion());
- await js('window.lqtac.openManual()');assert.equal(path.basename(opened),'LQTAC_dbFox_Manual_de_usuario_0.2.4.pdf');assert.ok(fs.existsSync(opened));
+ await js('window.lqtac.openManual()');assert.equal(path.basename(opened),'LQTAC_dbFox_Manual_de_usuario_0.2.5.pdf');assert.ok(fs.existsSync(opened));
  await js('document.querySelector("#close-about").click()');assert.equal(await js('document.querySelector("#about-dialog").open'),false);
  assert.equal(await js('document.querySelector("#open-help").getAttribute("aria-label")'),'Abrir manual de usuario');
- opened='';await js('document.querySelector("#open-help").click()');for(let i=0;i<50&&!opened;i++)await new Promise(r=>setTimeout(r,20));assert.equal(path.basename(opened),'LQTAC_dbFox_Manual_de_usuario_0.2.4.pdf');
+ opened='';await js('document.querySelector("#open-help").click()');for(let i=0;i<50&&!opened;i++)await new Promise(r=>setTimeout(r,20));assert.equal(path.basename(opened),'LQTAC_dbFox_Manual_de_usuario_0.2.5.pdf');
  console.log('PASS: Acerca de, versión, logo y apertura del manual');clearTimeout(timer);app.exit(0);
 }catch(error){console.error(error);clearTimeout(timer);app.exit(1);}});

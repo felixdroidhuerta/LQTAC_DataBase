@@ -1,4 +1,4 @@
-# LQTAC dbFox 0.2.4 - Manual de usuario
+# LQTAC dbFox 0.2.5 - Manual de usuario
 
 Actualizado: 31 de octubre de 2026.
 Capturas reales con datos ficticios y SQLite local.
@@ -118,7 +118,7 @@ El icono de encendido verde indica una sesión abierta; el rojo, una conexión a
 
 ### Menú de una conexión
 
-El botón derecho permite conectar, editar, duplicar, gestionar la contraseña, agrupar y borrar. En Conexiones puedes exportar o restaurar perfiles y grupos mediante un archivo .lqtdb cifrado.
+El botón derecho permite conectar, editar, duplicar, gestionar la contraseña, agrupar y borrar. En Conexiones puedes exportar o restaurar perfiles y grupos mediante .foxdb cifrado; también puedes importar archivos .lqtdb anteriores.
 
 ### Buscar y seleccionar una base
 
@@ -549,7 +549,7 @@ Un fallo, cambio de columnas o clave duplicada conserva todas las capturas anter
 
 ## Exportar e importar en otro equipo
 
-Traslada el dashboard con sus gráficos, datos, consultas, relaciones y fórmulas mediante un archivo .lqtac-dashboard.
+Traslada el dashboard con sus gráficos, datos, consultas, relaciones y fórmulas mediante un archivo .foxpanel. También se admiten los formatos anteriores .lqtac-dashboard y .json.
 
 ![Captura de Exportar e importar en otro equipo](assets/27-dashboard-importar.png)
 
