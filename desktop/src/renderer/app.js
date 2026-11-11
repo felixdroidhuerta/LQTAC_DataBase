@@ -14,6 +14,8 @@ import {bindQuery} from './query-binding.js';
 import {initEditorIndent} from './editor-indent.js';
 import {initSettings} from './settings.js';
 import {initSQLToolbar} from './sql-toolbar.js';
+import {initSQLFavorites} from './sql-favorites.js';
+import {initLineNumbers} from './line-numbers.js';
 import {initDashboard} from './dashboard.js';
 
 const $ = selector => document.querySelector(selector);
@@ -33,6 +35,9 @@ let pendingSwitch;
 let credentialProfile;
 let credentialResumeTab=null;
 let databasePicker=null;
+let serverPicker=null;
+let serverPickerRevision=0;
+const serverResponses=new Map();
 let tabNavigation=0,tabNavigationQueue=Promise.resolve();
 const designer = createTableDesigner({ api, show, runTask: action => task(action), onStatus: status => updateConnection(status), onQuery: sql => newQuery(sql), notify });
 const navigator = createConnectionNavigator({ api, runTask: action => task(action), notify, isBusy: () => busy,
@@ -127,7 +132,6 @@ function clearResults() {
 }
 async function selectTab(id, force = false) {
   if (busy && !force) return;
-  if(id!==activeTab&&!resultsGrid.confirmDiscard())return;
   const tab = tabs.find(item => item.id === id);
   if (!tab) return;
   const navigation=++tabNavigation;
@@ -175,7 +179,6 @@ function reopenTab() {
   tabs.push(tab); persistClosed(); persist(); selectTab(tab.id);
 }
 function newQuery(sql = connection?.engine === 'mongodb' ? '{"ping":1}' : '-- Nueva consulta\n') {
-  if(!resultsGrid.confirmDiscard())return null;
   rememberResults();tabNavigation++;
   const tab = { id: crypto.randomUUID(), title: `Consulta ${nextQueryNumber++}`, sql, connectionKey: connection?.sessionKey || null, connectionName: connection?.name || '', connectionEngine: connection?.engine || '' };
   if(connection?.connected)bindQuery(tab,connection);
@@ -213,11 +216,59 @@ function updateConnection(data) {
   renderDatabasePicker();
 }
 function renderDatabasePicker(){
+  void renderServerPicker();
   if(!databasePicker){databasePicker=document.createElement('select');databasePicker.id='query-database';databasePicker.setAttribute('aria-label','Base o esquema asociado a esta consulta');databasePicker.dataset.hint='Base o esquema de esta consulta · Se conserva al cerrar y se restaura antes de ejecutar';databasePicker.onchange=()=>{if(busy){renderDatabasePicker();return;}if(databasePicker.value)selectDatabase(databasePicker.value);};document.querySelector('.editor-toolbar>label').append(databasePicker);}
   databasePicker.hidden=!connection||['sqlite','sqlserver'].includes(connection.engine);databasePicker.disabled=!connection||busy;
   const tab=tabs.find(item=>item.id===activeTab);const desired=tab?.connectionKey===connection?.sessionKey?tab.connectionDatabase:connection?.database;
   databasePicker.replaceChildren();const empty=document.createElement('option');empty.value='';empty.textContent=connection?.scope==='schema'?'Seleccionar esquema…':'Seleccionar base…';databasePicker.append(empty);
   for(const item of connection?.schemas||[]){const option=document.createElement('option');option.value=item.name;option.textContent=item.name;databasePicker.append(option);}databasePicker.value=desired||'';
+}
+async function renderServerPicker(){
+  if(!serverPicker){
+    serverPicker=document.createElement('select');
+    serverPicker.id='query-server';
+    serverPicker.setAttribute('aria-label','Servidor de esta consulta');
+    serverPicker.dataset.hint='Servidor de ejecución. Conecta un servidor en el explorador para seleccionarlo aquí.';
+    $('#connection-label').after(serverPicker);
+    serverPicker.onchange=()=>changeQueryServer(serverPicker.value);
+  }
+  const revision=++serverPickerRevision;
+  const tab=tabs.find(item=>item.id===activeTab);
+  serverPicker.disabled=busy||!tab;
+  try{
+    const overview=await api.connectionOverview();
+    if(revision!==serverPickerRevision)return;
+    serverPicker.replaceChildren();
+    for(const session of overview.sessions.filter(item=>item.connected)){
+      const option=element('option',session.name);
+      option.value=session.sessionKey;
+      serverPicker.append(option);
+    }
+    const key=tab?.connectionKey||connection?.sessionKey||'';
+    if(![...serverPicker.options].some(option=>option.value===key)){
+      const option=element('option',tab?.connectionName||'Selecciona servidor conectado…');option.value=key;serverPicker.prepend(option);
+    }
+    serverPicker.value=key;
+  }catch(error){notify(error.message);}
+}
+async function changeQueryServer(key){
+  const tab=tabs.find(item=>item.id===activeTab);
+  if(busy||!tab||key===tab.connectionKey)return;
+  const previousKey=tab.connectionKey;
+  const view=resultsGrid.snapshot();
+  if(!serverResponses.has(tab.id))serverResponses.set(tab.id,new Map());
+  const saved=serverResponses.get(tab.id);
+  saved.set(previousKey,{view,database:tab.connectionDatabase,databaseName:tab.connectionDatabaseName});
+  await task(async()=>{
+    const data=await api.activateConnection(key);
+    const previous=saved.get(key);
+    Object.assign(tab,{connectionKey:key,connectionName:data.name,connectionEngine:data.engine,connectionDatabase:previous?.database??data.database??'',connectionDatabaseName:previous?.databaseName??data.databaseName??'',connectionProfileSignature:data.profileSignature||null});
+    updateConnection(data);
+    if(previous?.view){responseViews.set(tab.id,previous.view);restoreResults(tab.id);}
+    else{responseViews.delete(tab.id);clearResults();}
+    const restored=await api.restoreContext(key,bindQuery(tab,data));
+    updateConnection(restored);persist();renderTabs();
+  });
 }
 async function task(action) {
   if (busy) return;
@@ -255,7 +306,8 @@ async function performConnection(kind) {
 }
 async function run(selectionOnly=false,all=false) {
   if(busy)return;
-  if(!resultsGrid.confirmDiscard())return;
+  const previousResults = resultsGrid.snapshot();
+  const retainPrevious = resultsGrid.hasChanges();
   const tab = tabs.find(item => item.id === activeTab);
   if (!connection && !tab?.connectionKey) { notify('Conecta con un servidor o abre una base SQLite.'); return; }
   const source=$('#query').value,start=$('#query').selectionStart,end=$('#query').selectionEnd;
@@ -263,7 +315,12 @@ async function run(selectionOnly=false,all=false) {
   if(selectionOnly && $('#query').selectionStart===$('#query').selectionEnd)return notify('Selecciona la subconsulta que quieres ejecutar.');
   await task(async () => {
   if(tab&&activeTab!==tab.id)return notify('La consulta activa ha cambiado. Pulsa Ejecutar de nuevo.');
-  if(tab)responseViews.delete(tab.id);queryTools.clearResults();resultsGrid.clear();$('#results').replaceChildren(element('div','Preparando ejecución…','result-placeholder'));$('#query-info').textContent='Preparando ejecución…';
+  if (!retainPrevious) {
+    if(tab)responseViews.delete(tab.id);
+    queryTools.clearResults();resultsGrid.clear();
+    $('#results').replaceChildren(element('div','Preparando ejecución…','result-placeholder'));
+  }
+  $('#query-info').textContent='Preparando ejecución…';
   try{if(tab?.connectionKey&&tab.connectionKey!=='local'){
     const overview=await api.connectionOverview();
     if(!overview.sessions.some(item=>item.sessionKey===tab.connectionKey&&item.connected)){
@@ -282,18 +339,28 @@ async function run(selectionOnly=false,all=false) {
       unsubscribe=api.onExecutionProgress(progress);
       sqlExecutionControls.prepare({runId,key,engine:connection.engine});
       const output = await api.executeBatch(planned.map(item=>item.sql),key,Number($('#result-limit').value),context,runId);
+      let retainedView = null;
+      let resultOffset = 0;
+      if (retainPrevious && previousResults) {
+        const retained = await api.retainResults(previousResults.output.exportToken);
+        resultOffset = retained.offset;
+        // Keep local, unsaved cell values separate from the server snapshot.
+        output.results = [...previousResults.output.results, ...retained.results.slice(resultOffset)];
+        retainedView = {...previousResults, index: resultOffset, states: [...previousResults.states, ...output.results.slice(resultOffset).map(() => ({field:-1,search:'',sortColumn:null,direction:null}))]};
+      }
       if(tab)try{await api.rememberDashboardQuery(tab.id,output.exportToken);}catch(error){notify(error.message);}
       queryPending=output.queryPending;
       queryTools.updateResults(output);
       for(const item of output.statementOutputs)progress({...item,phase:'finish'});
       updateConnection(output);
       if (output.warning) notify(output.warning);
-      resultsGrid.setOutput(output);
+      resultsGrid.setOutput(output, retainedView);
       const errorIndex=output.results.findIndex(result=>result.error);if(errorIndex>=0){$('#export-result-index').value=String(errorIndex);$('#export-result-index').dispatchEvent(new Event('change'));const failure=output.results[errorIndex];if(failure.errorCode==='QUERY_TIMEOUT'){$('#query-info').textContent='Agotado tiempo máximo de consulta';notify('Agotado tiempo máximo de consulta');}else notify(failure.errorCode==='QUERY_CANCELLED'?failure.error:'Ejecución detenida en el primer error. Los cambios anteriores no se deshacen automáticamente.');}else if(all)notify(`${output.statementOutputs.length} sentencias ejecutadas.`);
     } catch (error) {
       if(!records.size)progress({index:0,sql:planned[0]?.sql||source.slice(start,end)||source,phase:'start'});
       for(const [index,record]of records)if(!finished.has(index))outputs.finish(record,{message:error.message,duration:Math.round(performance.now()-started),status:'error'});
-      $('#results').replaceChildren(element('div', error.message, 'error'));
+      if (!retainPrevious) $('#results').replaceChildren(element('div', error.message, 'error'));
+      else notify(error.message);
       $('#query-info').textContent = 'Error de consulta';
       // Earlier statements in a script may have succeeded before a SQL error.
       updateConnection(await api.status());
@@ -329,6 +396,8 @@ $('#query').value = tabs.find(tab=>tab.id===activeTab)?.sql ?? '';
 sqlHighlight.refresh();
 $('#query').addEventListener('input', () => { const tab = tabs.find(t => t.id === activeTab); if (tab) { tab.sql = $('#query').value;if(tab.sqlFileId)tab.sqlFileDirty=true;persist();renderTabs(); } });
 initSQLFiles({api,runTask:action=>task(action),getDocument:()=>tabs.find(tab=>tab.id===activeTab),onOpen:file=>{const tab=newQuery(file.sql);if(!tab)return;tab.title=file.name;tab.sqlFileId=file.id;tab.sqlFileDirty=false;persist();renderTabs();},onSaved:(id,file,sql)=>{const tab=tabs.find(tab=>tab.id===id);if(tab){tab.title=file.name;tab.sqlFileId=file.id;tab.sqlFileDirty=tab.sql!==sql;persist();renderTabs();}},notify,isBusy:()=>busy});
+initLineNumbers($('#query'));
+initSQLFavorites({api,editor:$('#query'),notify,onOpen:item=>{if(busy){notify('Espera a que termine la operación actual.');return false;}const tab=newQuery(item.sql);if(!tab)return false;tab.title=item.name;persist();renderTabs();notify('Favorito abierto en una pestaña nueva.');return true;}});
 sqlExecutionControls = initSQLToolbar({api,notify});
 document.addEventListener('keydown', event => {
   if (event.defaultPrevented || document.querySelector('dialog[open]')) return;
@@ -346,6 +415,19 @@ const defaultPorts = { postgresql: 5432, mysql: 3306, mariadb: 3306, sqlserver: 
 const supportedEngines = Object.keys(engineNames);
 function updateProfileHints() {
   const engine = profileForm.elements.engine.value;
+  const methods=['mysql','mariadb'].includes(engine);
+  if(!methods)profileForm.elements.method.value='tcp';
+  $('#connection-method-field').hidden=!methods;
+  const method=profileForm.elements.method.value;
+  $('#connection-socket-field').hidden=method!=='socket';
+  $('#connection-ssh-fields').hidden=method!=='ssh';
+  $('#ssh-key-field').hidden=profileForm.elements.sshAuth.value==='password';
+  $('#ssh-auth-hint').textContent=profileForm.elements.sshAuth.value==='password'?'La contraseña SSH se solicita al pulsar Conectar, después de guardar el perfil.':'Selecciona una clave privada o usa el agente SSH. Las claves cifradas deben estar cargadas en el agente (Pageant en Windows).';
+  profileForm.elements.socketPath.required=method==='socket';
+  for(const key of ['sshHost','sshUser'])profileForm.elements[key].required=method==='ssh';
+  profileForm.elements.sshFingerprint.required=false;
+  profileForm.elements.host.closest('.form-columns').hidden=method==='socket';
+  profileForm.elements.host.required=method!=='socket';
   profileForm.elements.username.required = engine !== 'mongodb';
   profileForm.elements.database.required = engine === 'oracle';
   $('#database-field-label').textContent = engine === 'oracle' ? 'Servicio Oracle (SERVICE_NAME)' : 'Base de datos predeterminada (opcional)';
@@ -441,11 +523,15 @@ $('#connection-backup-form').onsubmit=async event=>{
 $('#new-profile-side').onclick = () => editProfile();
 $('#cancel-profile').onclick = () => $('#connection-dialog').close();
 profileForm.elements.engine.onchange = () => { profileForm.elements.port.value = defaultPorts[profileForm.elements.engine.value]; updateProfileHints(); };
+profileForm.elements.method.onchange=updateProfileHints;
+profileForm.elements.sshAuth.onchange=updateProfileHints;
+profileForm.elements.sshFingerprint.addEventListener('invalid',()=>{$('#ssh-verification').open=true;});
 profileForm.elements.tls.onchange = () => { if (profileForm.elements.engine.value === 'clickhouse' && [8123, 8443].includes(Number(profileForm.elements.port.value))) profileForm.elements.port.value = profileForm.elements.tls.checked ? 8443 : 8123; };
 profileForm.onsubmit = async event => {
   event.preventDefault();
   if (busy || !api || !profileForm.reportValidity()) return;
   const profile = Object.fromEntries(new FormData(profileForm));
+  if(profile.method==='socket'){profile.host=profile.host||'localhost';profile.port=profile.port||3306;}
   profile.tls = profileForm.elements.tls.checked;
   busy = true;
   const submit = profileForm.querySelector('[type="submit"]'); submit.disabled = true;
@@ -471,7 +557,7 @@ async function requestRemote(profile) {
 }
 async function connectSavedOrPrompt(profile, resumeTab=null) {
   const status = await api.credentialStatus(profile.id);
-  if (status.saved) {
+  if (status.saved && !(profile.method==='ssh'&&profile.sshAuth==='password')) {
     let data;
     try { data = await api.connectProfile(profile.id, null, true); }
     catch (error) {
@@ -495,6 +581,8 @@ async function finishRemoteConnection(id, data, resumeTab=null) {
 }
 async function openCredentials(profile,resumeTab=null) {
   credentialProfile = profile;
+  $('#ssh-password').value='';
+  $('#ssh-password-field').hidden=!(profile.method==='ssh'&&profile.sshAuth==='password');
   credentialResumeTab=resumeTab;
   $('#connection-password').value = '';
   const status = await api.credentialStatus(profile.id);
@@ -520,11 +608,11 @@ async function authenticate(testOnly) {
     const saved = (await api.credentialStatus(id)).saved;
     const password = !input && saved ? null : input;
     if (testOnly) {
-      await api.testProfile(id, password);
+      await api.testProfile(id, password, $('#ssh-password').value);
       $('#credentials-message').textContent = 'Conexión correcta. Puedes conectar con esta configuración.';
     } else {
       const resumeTab=credentialResumeTab;
-      const data = await api.connectProfile(id, password, $('#remember-password').checked);
+      const data = await api.connectProfile(id, password, $('#remember-password').checked, $('#ssh-password').value);
       $('#connection-password').value = '';
       dialog.close(); credentialProfile = null;
       await finishRemoteConnection(id, data, resumeTab);
@@ -536,7 +624,7 @@ $('#credentials-form').onsubmit = event => { event.preventDefault(); authenticat
 $('#test-connection').onclick = () => authenticate(true);
 $('#cancel-credentials').onclick = () => $('#credentials-dialog').close();
 $('#credentials-dialog').addEventListener('cancel', event => { if (busy) event.preventDefault(); });
-$('#credentials-dialog').addEventListener('close', () => { $('#connection-password').value = ''; credentialProfile = null;credentialResumeTab=null; });
+$('#credentials-dialog').addEventListener('close', () => { $('#ssh-password').value=''; $('#connection-password').value = ''; credentialProfile = null;credentialResumeTab=null; });
 $('#disconnect-db').onclick = () => task(async () => {
   if (connection?.engine === 'sqlite' && !confirm('Los cambios de SQLite sin exportar se perderán. ¿Desconectar?')) return;
   if (connection?.engine !== 'sqlite' && !confirm('Se cerrará la sesión y se descartarán transacciones no confirmadas. ¿Desconectar?')) return;

@@ -2,19 +2,22 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { cancelQuery } = require('./cancel-query.cjs');
 const DEFAULT_TIMEOUT_SECONDS = 30;
+const { MAX_STATEMENTS } = require('./sql-statements.cjs');
 function validateSettings(value) {
   if (!value || typeof value !== 'object' || !Number.isInteger(value.queryTimeoutSeconds) || value.queryTimeoutSeconds < 1 || value.queryTimeoutSeconds > 86400) throw new Error('El tiempo máximo debe ser un número entero entre 1 y 86400 segundos.');
-  return { queryTimeoutSeconds: value.queryTimeoutSeconds };
+  const maxStatements=value.maxStatements ?? MAX_STATEMENTS;
+  if (!Number.isInteger(maxStatements) || maxStatements < 1 || maxStatements > MAX_STATEMENTS) throw new Error(`El máximo de sentencias debe ser un número entero entre 1 y ${MAX_STATEMENTS}.`);
+  return { queryTimeoutSeconds: value.queryTimeoutSeconds, maxStatements };
 }
 class SettingsStore {
   constructor(directory) {
     this.file = path.join(directory, 'settings.json');
-    this.value = { queryTimeoutSeconds: DEFAULT_TIMEOUT_SECONDS };
+    this.value = { queryTimeoutSeconds: DEFAULT_TIMEOUT_SECONDS, maxStatements: MAX_STATEMENTS };
     try { this.value = validateSettings(JSON.parse(fs.readFileSync(this.file, 'utf8'))); } catch { /* Missing or invalid settings use the documented defaults. */ }
   }
   get() { return { ...this.value }; }
   save(value) {
-    const next = validateSettings(value);
+    const next = validateSettings({ ...this.value, ...value });
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     fs.writeFileSync(this.file + '.tmp', JSON.stringify(next, null, 2), { mode: 0o600 });
     fs.renameSync(this.file + '.tmp', this.file);

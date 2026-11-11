@@ -1,0 +1,48 @@
+body { zoom:var(--appearance-scale,1); width:calc(100vw / var(--appearance-scale,1)); height:calc(100vh / var(--appearance-scale,1)); font-family:var(--appearance-font,'Segoe UI',sans-serif); }
+body :is(button,input,select,textarea) { font-family:inherit; }
+.sql-source-surface :is(textarea.sql-source-input,.sql-highlight-layer) { font-family:var(--appearance-font,'Segoe UI',sans-serif)!important; }
+#settings-dialog { max-height:calc(100vh - 50px);overflow:auto; }
+.appearance-settings { margin:16px 0;padding:12px;border:1px solid var(--border);border-radius:6px; }
+.appearance-settings legend { padding:0 6px;font-weight:600; }
+.appearance-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 14px; }
+.appearance-grid label { display:flex;flex-direction:column;gap:5px;font-size:12px; }
+.appearance-grid :is(input,select) { width:100%;min-height:36px;border:1px solid var(--border);border-radius:5px;padding:6px; }
+.appearance-grid input[type=color] { padding:3px; }
+html[data-palette=color] { --border:color-mix(in srgb,var(--appearance-color) 30%,#273342);--blue:color-mix(in srgb,var(--appearance-color) 62%,white); }
+html[data-palette=color] :is(body,main,.view) { background:color-mix(in srgb,var(--appearance-color) 10%,#101721); }
+html[data-palette=color] :is(.sidebar,.topbar,footer,.editor-toolbar,.results,.card,.module-row,.profile-row,.secondary,dialog,.connection-menu,.completion-panel,.outputs-panel,.relation-card,input,select,textarea,.editor-caption,.results-header,.outputs-title,.editor-note,.designer-subtabs,.designer-properties,.designer-footer,.mini-tools) { background:color-mix(in srgb,var(--appearance-color) 15%,#18212d);border-color:color-mix(in srgb,var(--appearance-color) 30%,#293849); }
+html[data-palette=color] :is(.sql-source-surface,.sql-source-surface .sql-highlight-layer,#connection-form input,#connection-form select,#connection-password,#connection-group-name,#settings-dialog input) { background:color-mix(in srgb,var(--appearance-color) 10%,#121c29); }
+html[data-palette=color] :is(th,#results th,.query-tab.active,.connection-context,.profiles-empty) { background:color-mix(in srgb,var(--appearance-color) 24%,#1a2838); }
+html[data-palette=color] :is(.tabs,.query-tab) { background:color-mix(in srgb,var(--appearance-color) 12%,#15212f); }
+html[data-palette=color] :is(.tabs>.tab.active,.query-tab.active,.connection-row.selected,.connection-row.active-connection,.connection-row:hover,.completion-option.selected,#results tbody tr:hover,.nav.active,.tree-object:hover) { background:color-mix(in srgb,var(--appearance-color) 32%,#203040);color:#fff; }
+html[data-palette=color] tbody tr:nth-child(even) { background:color-mix(in srgb,var(--appearance-color) 14%,#192533); }
+html[data-palette=color] :is(.panel-splitter,.outputs-resize) { background:color-mix(in srgb,var(--appearance-color) 35%,#34404f); }
+
+/* Complete the palette without recoloring logos, chart data or status indicators. */
+html[data-palette=color] {
+  --color-base:color-mix(in srgb,var(--appearance-color) 10%,#101116);
+  --color-surface:color-mix(in srgb,var(--appearance-color) 15%,#19191e);
+  --color-raised:color-mix(in srgb,var(--appearance-color) 23%,#202025);
+  --color-active:color-mix(in srgb,var(--appearance-color) 34%,#252127);
+  --color-border:color-mix(in srgb,var(--appearance-color) 38%,#3b3b40);
+  --color-accent:color-mix(in srgb,var(--appearance-color) 47%,#ffffff);
+  --color-button:color-mix(in srgb,var(--appearance-color) 37%,#15131a);
+  --border:var(--color-border);
+}
+html[data-palette=color] :is(.rail,.tabs,.result-tabs) { background:var(--color-base);border-color:var(--color-border); }
+html[data-palette=color] :is(.rail-button.active,.rail-button:hover,.lab,.card-icon,.note,.profile-hint,.relations-scroll,.tool-tip,.connection-context,.profiles-empty) { background:var(--color-raised);border-color:var(--color-border);color:#f1ebef; }
+html[data-palette=color] :is(.rail-button.active,.card-icon,.lab-icon,.eyebrow,.sidebar-about span,.edit-table,.edit-object,.view-columns,.select-database,.schema-tree.active-database>summary,h1 span) { color:var(--color-accent); }
+html[data-palette=color] :is(.primary,.primary:hover) { background:var(--color-button);border:1px solid var(--color-border);color:#fff; }
+html[data-palette=color] :is(.rail-button.active,.query-tab.active,.result-tab.active) { border-color:var(--color-accent); }
+html[data-palette=color] :is(.mini-tools,.mini-tools>*,.sidebar-about,.connection-menu-separator,.sql-source-surface,.results,.outputs-panel) { border-color:var(--color-border); }
+html[data-palette=color] :is(.query-tab:not(.active):hover,.tabs>.tab:hover,.result-tab-item.active,.result-tab.active,.result-tab:hover,.result-tab-close:hover,.sidebar-about:hover,.sidebar-about:focus-visible,.completion-option.selected,.tree-object:hover) { background:var(--color-active);color:#fff; }
+html[data-palette=color] :is(.result-filters select,.result-filters input,#query-database) { background:var(--color-base);border-color:var(--color-border);color:#f1ebef; }
+html[data-palette=color] :is(.cell-copy-menu,.cell-copy-menu button:hover,.cell-copy-menu button:focus-visible) { background:var(--color-raised);border-color:var(--color-border);color:#fff; }
+html[data-palette=color] :is(#results tr.cell-row-selected>td,.outputs-grid tr.cell-row-selected>td) { background:var(--color-raised);color:#f5edf2; }
+html[data-palette=color] :is(#results tr>td.cell-selected,.outputs-grid tr>td.cell-selected) { background:var(--color-active);color:#fff;box-shadow:inset 0 0 0 2px var(--color-accent); }
+html[data-palette=color] :is(.dashboard-view,.db-dialog) { --db-card:var(--color-surface);--db-bg:var(--color-base);--db-line:var(--color-border);--db-ink:#f1ebef;--db-muted:#c4b9c0; }
+html[data-palette=color] .db-visual-dialog { --ve-bg:var(--color-surface);--ve-panel:var(--color-base);--ve-line:var(--color-border);--ve-ink:#f1ebef;--ve-muted:#c4b9c0; }
+html[data-palette=color] :is(.db-model-diagram,.db-model-table) { background:var(--color-surface);border-color:var(--color-border); }
+html[data-palette=color] .db-table-scroll tr:nth-child(even) { background:var(--color-surface); }
+html[data-palette=color] .db-table-scroll tr[data-pivot-kind=total] { background:var(--color-active)!important; }
+html[data-palette=color] .db-table-scroll tr[data-pivot-kind=subtotal] { background:var(--color-raised)!important; }

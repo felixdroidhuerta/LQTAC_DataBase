@@ -91,7 +91,7 @@ export function attachSQLHighlight(editor, options = {}) {
     renderSQLCode(layer, editor.value, { dialect });
     // Keep the final empty line aligned with the native textarea's scroll extent.
     layer.append(document.createTextNode('\u200b'));
-    editor.classList.add('sql-source-input'); sync();
+    editor.classList.add('sql-source-input'); sync();editor.dispatchEvent(new Event('sql-highlight:refresh'));
   }
   editor.addEventListener('input', refresh);
   editor.addEventListener('scroll', sync);

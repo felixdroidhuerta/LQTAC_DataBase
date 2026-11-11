@@ -18,5 +18,7 @@ test('compound routines, custom MySQL delimiters, Oracle anonymous declarations 
   assert.equal(splitSQL('DECLARE n NUMBER; BEGIN n:=1; IF n=1 THEN n:=2; END IF; END;\n/\nSELECT 1 FROM DUAL;','oracle').length,2);
   const sqlserver='CREATE PROCEDURE dbo.p AS BEGIN SELECT 1; SELECT 2; END;\nGO\nSELECT 3;';assert.equal(splitSQL(sqlserver,'sqlserver').length,2);
   const batch='DECLARE @n int; SET @n=2; SELECT @n; SELECT 3;\nGO\nSELECT 4;';assert.equal(planExecution(batch,{mode:'all'},'sqlserver').length,2);assert.equal(planExecution('SELECT 1; SELECT 2;',{mode:'current',cursor:16},'sqlserver').length,1);
-  assert.throws(()=>planExecution('SELECT 1;'.repeat(101),{mode:'all'},'mysql'),/100/);
+  assert.equal(planExecution('SELECT 1;'.repeat(1000),{mode:'all'},'mysql').length,1000);
+  assert.throws(()=>planExecution('SELECT 1;'.repeat(1001),{mode:'all'},'mysql'),/1000/);
+  assert.throws(()=>planExecution('SELECT 1;'.repeat(3),{mode:'all'},'mysql','',2),/máximo 2/);
 });

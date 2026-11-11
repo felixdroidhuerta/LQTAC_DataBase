@@ -125,13 +125,14 @@ export function createConnectionNavigator({ api, runTask, notify, onConnect, onD
     container.append(row); parent.append(container);
     if (expanded.get(id)) {
       const body = el('div', undefined, 'connection-objects'); body.setAttribute('role', 'group'); container.append(body);
-      if (!connected) body.append(el('p', 'Sin conexión. Pulsa ⏻ para conectar.', 'empty-group'));
+      if (!connected) { trees.delete(id); body.append(el('p', 'Sin conexión. Pulsa ⏻ para conectar.', 'empty-group')); }
       else {
         let tree = trees.get(id);
         if (!tree) {
           tree = new DatabaseExplorer(body, {
             onQuery: sql => onObject(id, 'query', sql), onSelect: schema => onObject(id, 'select', schema),
-            onEdit: (schema, table) => onObject(id, 'edit', schema, table), onCreate: schema => onObject(id, 'create', schema),onEditObject:(schema,object)=>onObject(id,'definition',schema,object)
+            onEdit: (schema, table) => onObject(id, 'edit', schema, table), onCreate: schema => onObject(id, 'create', schema),onEditObject:(schema,object)=>onObject(id,'definition',schema,object),
+            onColumns: (schema, name) => api.explorerColumns([{schema,name}],id)
           }); trees.set(id, tree);
         }
         tree.root = body;

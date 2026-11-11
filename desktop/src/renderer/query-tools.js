@@ -4,8 +4,9 @@ export function initQueryTools({api,getConnection,runSelection,runTask,notify,is
   let snapshot=null; const editor=$('#query'); const index=$('#export-result-index');
   try{const limit=Number(localStorage.getItem('lqtac.resultLimit') ?? 1000);if([0,50,100,500,1000].includes(limit))$('#result-limit').value=String(limit);}catch{}
   $('#result-limit').onchange=()=>{try{localStorage.setItem('lqtac.resultLimit',$('#result-limit').value);}catch{}};
-  const theme=()=>$('#toggle-theme').setAttribute('aria-pressed',String(document.documentElement.dataset.theme==='dark'));theme();
-  $('#toggle-theme').onclick=()=>{const next=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=next;try{localStorage.setItem('lqtac.theme',next);}catch{}theme();};
+  const theme=()=>{const mode=window.dbfoxAppearance.read().mode;const names={light:'claro',dark:'oscuro',color:'color'};$('#toggle-theme').setAttribute('aria-pressed',String(mode!=='light'));$('#toggle-theme').dataset.hint=`Apariencia · Modo ${names[mode]} · Cambiar modo`;};theme();
+  document.addEventListener('dbfox:appearance',theme);
+  $('#toggle-theme').onclick=()=>{const value=window.dbfoxAppearance.read();value.mode={light:'dark',dark:'color',color:'light'}[value.mode];window.dbfoxAppearance.apply(value);};
   $('#run-selection').onclick=()=>runSelection();
   document.addEventListener('keydown',event=>{if(event.altKey&&event.shiftKey&&event.key.toLowerCase()==='f'&&!$('#sql').classList.contains('hidden')){event.preventDefault();if(!isBusy())$('#format-query').click();}});
   $('#format-query').onclick=()=>runTask(async()=>{
@@ -19,11 +20,12 @@ export function initQueryTools({api,getConnection,runSelection,runTask,notify,is
   document.addEventListener('lqtac:data-changed',syncButtons);
   index.addEventListener('change',syncButtons);
   for(const format of ['csv','xlsx'])$('#export-'+format).onclick=()=>runTask(async()=>{if(snapshot&&await api.exportResult(snapshot.exportToken,Number(index.value||0),format,getExportRows?.()))notify('Resultado exportado.');});
-  const tooltip=node('div');tooltip.className='tool-tip hidden';tooltip.id='query-tool-tip';tooltip.setAttribute('role','tooltip');document.body.append(tooltip);
-  let target;
-  const hide=()=>{tooltip.classList.add('hidden');if(target)target.removeAttribute('aria-describedby');target=null;};
-  function tip(event){const button=event.target.closest('[data-hint]');if(!button)return;target=button;tooltip.textContent=button.dataset.hint;tooltip.classList.remove('hidden');button.setAttribute('aria-describedby',tooltip.id);const r=button.getBoundingClientRect();tooltip.style.left=Math.max(8,Math.min(r.left,innerWidth-tooltip.offsetWidth-8))+'px';tooltip.style.top=Math.max(8,Math.min(r.bottom+7,innerHeight-tooltip.offsetHeight-8))+'px';}
-  document.addEventListener('pointerover',tip);document.addEventListener('focusin',tip);document.addEventListener('pointerout',event=>{if(target&&!target.contains(event.relatedTarget))hide();});document.addEventListener('focusout',hide);window.addEventListener('resize',hide);document.addEventListener('scroll',hide,true);
+  const tooltip=node('div');tooltip.className='tool-tip hidden';tooltip.id='query-tool-tip';tooltip.setAttribute('role','tooltip');$('#context-help').append(tooltip);
+  let target,showTimer=null,keyboardNavigation=false;
+  const hide=()=>{clearTimeout(showTimer);showTimer=null;tooltip.classList.add('hidden');if(target)target.removeAttribute('aria-describedby');target=null;};
+  function show(button){if(!button?.isConnected||!button.dataset.hint)return;hide();target=button;tooltip.textContent=button.dataset.hint;tooltip.classList.remove('hidden');button.setAttribute('aria-describedby',tooltip.id);}
+  function schedule(event,delay=550){const button=event.target.closest?.('[data-hint]');if(!button||button===target)return;hide();showTimer=setTimeout(()=>show(button),delay);}
+  document.addEventListener('pointerover',event=>schedule(event));document.addEventListener('focusin',event=>{if(keyboardNavigation)schedule(event,180);});document.addEventListener('pointerout',event=>{if(target&&!target.contains(event.relatedTarget))hide();else if(!target)clearTimeout(showTimer);});document.addEventListener('focusout',hide);document.addEventListener('pointerdown',()=>{keyboardNavigation=false;hide();},true);document.addEventListener('input',hide,true);document.addEventListener('change',hide,true);document.addEventListener('keydown',event=>{keyboardNavigation=true;if(event.key==='Escape')hide();},true);window.addEventListener('resize',hide);document.addEventListener('scroll',hide,true);
   const dialog=node('dialog');dialog.id='relations-dialog';const heading=node('h2','Relaciones entre tablas');const controls=node('div');controls.className='relations-controls';const schema=node('select');schema.setAttribute('aria-label','Base o esquema del diagrama');const search=node('input');search.placeholder='Filtrar tabla y sus relaciones…';search.setAttribute('aria-label','Filtrar tablas del diagrama');const zoom=node('select');zoom.setAttribute('aria-label','Zoom del diagrama');for(const value of [50,75,100,125,150]){const option=node('option',value+'%');option.value=value;zoom.append(option);}zoom.value='100';const close=node('button','Cerrar');close.className='secondary';close.onclick=()=>dialog.close();controls.append(schema,search,zoom,close);const message=node('p');message.id='relations-message';const scroll=node('div');scroll.className='relations-scroll';const canvas=node('div');canvas.className='relations-canvas';scroll.append(canvas);dialog.append(heading,controls,message,scroll);document.body.append(dialog);
   let graph=null,session=null;
   const svgNode=tag=>document.createElementNS('http://www.w3.org/2000/svg',tag);

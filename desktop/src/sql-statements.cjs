@@ -1,4 +1,5 @@
 const engines=new Set(['mysql','mariadb','postgresql','sqlserver','oracle','sqlite','clickhouse','mongodb']);
+const MAX_STATEMENTS=1000;
 function splitSQL(source,engine='mysql',{sqlMode='',lenient=false,batchTSQL=false}={}){
   if(typeof source!=='string'||source.length>1000000)throw new Error('El script debe tener como máximo un millón de caracteres.');if(!engines.has(engine))throw new Error('Motor SQL no válido.');
   if(engine==='mongodb'){if(!source.trim())return [];JSON.parse(source);return [{sql:source.trim(),start:0,end:source.length,line:1}];}
@@ -48,7 +49,7 @@ function splitSQL(source,engine='mysql',{sqlMode='',lenient=false,batchTSQL=fals
   if(hasCode)finish(source.length);
   if(!lenient&&result.some(item=>item.incomplete))throw new Error('Hay un bloque BEGIN/END o una cadena sin cerrar.');return result;
 }
-function planExecution(source,options,engine,sqlMode=''){
+function planExecution(source,options,engine,sqlMode='',maxStatements=MAX_STATEMENTS){
   if(typeof source!=='string'||source.length>1000000)throw new Error('El script supera el tamaño permitido.');
   if(!options||!['current','selection','all'].includes(options.mode))throw new Error('Modo de ejecución no válido.');
   const cursor=options.cursor??0,start=options.start??cursor,end=options.end??cursor;
@@ -56,7 +57,8 @@ function planExecution(source,options,engine,sqlMode=''){
   let statements;
   if(options.mode==='selection'){if(start===end)throw new Error('Selecciona el SQL que quieres ejecutar.');statements=splitSQL(source.slice(start,end),engine,{sqlMode,batchTSQL:engine==='sqlserver'});}
   else{const all=splitSQL(source,engine,{sqlMode,lenient:options.mode==='current',batchTSQL:engine==='sqlserver'&&options.mode==='all'});if(options.mode==='all')statements=all;else{const current=all.find(item=>cursor>=item.start&&cursor<=item.end)||all.find(item=>item.start>cursor)||all.at(-1);statements=current?[current]:[];}}
-  if(!statements.length)throw new Error('No hay una sentencia para ejecutar.');if(statements.some(item=>item.incomplete))throw new Error('La sentencia del cursor contiene una cadena o bloque sin cerrar.');if(statements.length>100)throw new Error('Ejecuta como máximo 100 sentencias por lanzamiento.');
+  if(!Number.isInteger(maxStatements)||maxStatements<1||maxStatements>MAX_STATEMENTS)throw new Error('Límite de sentencias no válido.');
+  if(!statements.length)throw new Error('No hay una sentencia para ejecutar.');if(statements.some(item=>item.incomplete))throw new Error('La sentencia del cursor contiene una cadena o bloque sin cerrar.');if(statements.length>maxStatements)throw new Error(`Ejecuta como máximo ${maxStatements} sentencias por lanzamiento. Puedes modificar el límite en Configuración.`);
   return statements;
 }
-module.exports={splitSQL,planExecution};
+module.exports={splitSQL,planExecution,MAX_STATEMENTS};

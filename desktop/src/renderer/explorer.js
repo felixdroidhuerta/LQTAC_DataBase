@@ -30,13 +30,15 @@ export function objectQuery(schema, object, remote) {
 }
 
 export class DatabaseExplorer {
-  constructor(root, { onQuery, onSelect, onEdit, onCreate, onEditObject }) {
+  constructor(root, { onQuery, onSelect, onEdit, onCreate, onEditObject, onColumns }) {
     this.root = root; this.onQuery = onQuery; this.onSelect = onSelect;
     this.onEdit = onEdit; this.onCreate = onCreate;
     this.onEditObject=onEditObject;
+    this.onColumns=onColumns; this.columns=new Map();
     this.open = new Map(); this.session = null;
   }
   render(data, filter = '') {
+    this.lastData=data; this.lastFilter=filter;
     const session = data.profileId || data.name;
     if (this.session !== session) { this.open.clear(); this.session = session; }
     this.root.replaceChildren();
@@ -94,14 +96,37 @@ export class DatabaseExplorer {
           button.dataset.object = object.name;
           button.dataset.type = object.type;
           button.onclick = () => this.onQuery(objectQuery(schema.name, object, data.engine));
-          if (editable && object.type === 'table' && this.onEdit) {
+          if (['table','view'].includes(object.type) && data.engine !== 'mongodb' && this.onColumns) {
             const row = node('div', undefined, 'tree-object-row');
-            const edit = node('button', '✎', 'edit-table');
-            edit.title = `Editar estructura de ${schema.name}.${object.name}`;
-            edit.setAttribute('aria-label', edit.title);
-            edit.dataset.schema = schema.name; edit.dataset.table = object.name;
-            edit.onclick = () => this.onEdit(schema.name, object.name);
-            row.append(button, edit); folder.details.append(row);
+            const key=JSON.stringify([schema.name,object.name,object.type]);
+            const state=this.columns.get(key);
+            const show=node('button',undefined,'view-columns');
+            show.innerHTML='<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>';
+            show.dataset.schema=schema.name;show.dataset.object=object.name;
+            show.title=`${state?.open?'Ocultar':'Ver'} campos de ${schema.name}.${object.name}`;
+            show.setAttribute('aria-label',show.title); show.setAttribute('aria-expanded',String(!!state?.open));
+            show.onclick=async()=>{
+              if(this.columns.get(key)?.open){this.columns.set(key,{open:false});this.render(this.lastData,this.lastFilter);return;}
+              const pending={open:true,loading:true};this.columns.set(key,pending);this.render(this.lastData,this.lastFilter);
+              try{const result=await this.onColumns(schema.name,object.name);if(this.columns.get(key)!==pending)return;this.columns.set(key,{open:true,items:result[0]?.columns||[]});}
+              catch(error){if(this.columns.get(key)!==pending)return;this.columns.set(key,{open:true,error:error.message});}
+              this.render(this.lastData,this.lastFilter);
+            };
+            row.append(button,show);
+            if(editable && object.type === 'table' && this.onEdit){
+              const edit=node('button','✎','edit-table');edit.title=`Editar estructura de ${schema.name}.${object.name}`;edit.setAttribute('aria-label',edit.title);edit.dataset.schema=schema.name;edit.dataset.table=object.name;edit.onclick=()=>this.onEdit(schema.name,object.name);row.append(edit);
+            }else if(object.type==='view'&&this.onEditObject){
+              const edit=node('button','✎','edit-object');edit.title=`Editar definición de ${schema.name}.${object.name}`;edit.setAttribute('aria-label',edit.title);edit.dataset.schema=schema.name;edit.dataset.object=object.name;edit.dataset.type=object.type;edit.onclick=()=>this.onEditObject(schema.name,object);row.append(edit);
+            }
+            folder.details.append(row);
+            if(state?.open){
+              const list=node('div',undefined,'tree-columns');list.setAttribute('role','group');list.setAttribute('aria-label',`Campos de ${object.name}`);
+              if(state.loading)list.append(node('p','Cargando campos…','tree-columns-message'));
+              else if(state.error)list.append(node('p',state.error,'tree-columns-message'));
+              else if(!state.items.length)list.append(node('p','Sin campos visibles','tree-columns-message'));
+              else for(const column of state.items){const field=node('div',undefined,'tree-column');field.append(node('span',column.name,'tree-column-name'),node('span',column.dataType,'tree-column-type'));field.title=`${column.name} · ${column.dataType}`;list.append(field);}
+              folder.details.append(list);
+            }
           } else if(['view','procedure','function'].includes(object.type)&&this.onEditObject){
             const row=node('div',undefined,'tree-object-row');const edit=node('button','✎','edit-object');edit.title=`Editar definición de ${schema.name}.${object.name}`;edit.setAttribute('aria-label',edit.title);edit.dataset.schema=schema.name;edit.dataset.object=object.name;edit.dataset.type=object.type;edit.onclick=()=>this.onEditObject(schema.name,object);row.append(button,edit);folder.details.append(row);
           } else folder.details.append(button);

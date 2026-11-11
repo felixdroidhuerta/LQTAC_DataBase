@@ -15,6 +15,15 @@ app.whenReady().then(async()=>{const window=BrowserWindow.getAllWindows()[0];win
   assert.equal(await js('document.querySelector(".data-cell-input").selectionStart'),5);
   await js("(()=>{const e=document.querySelector('.data-cell-input');e.value='copied';e.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))})()");
   assert.equal(database.exec('SELECT name FROM edits WHERE id=1')[0].values[0][0],'Alpha');assert.equal(await js('document.querySelectorAll(".data-cell-dirty").length'),1);
+  await js('document.querySelector("#run-query").click()');
+  await until('document.querySelectorAll(".result-tab").length===2 && !document.querySelector("#run-query").disabled');
+  assert.equal(await js('document.querySelector("#results tbody tr td:nth-child(2)").textContent'),'Alpha');
+  await js('document.querySelector("#edit-result-data").click()');
+  await until('document.querySelector("#edit-result-data").getAttribute("aria-pressed")==="true"');
+  await js('document.querySelectorAll(".result-tab")[0].click()');
+  assert.equal(await js('document.querySelectorAll(".data-cell-dirty").length'),1);
+  assert.equal(await js('document.querySelector("#results tbody tr td:nth-child(2)").textContent'),'copied');
+  await js('document.querySelector("#results tbody tr td:nth-child(2)").click()');
   const points=await js("(()=>{const a=document.querySelector('.data-fill-handle').getBoundingClientRect(),b=document.querySelectorAll('#results tbody tr')[2].cells[1].getBoundingClientRect();return{a:{x:Math.round(a.x+a.width/2),y:Math.round(a.y+a.height/2)},b:{x:Math.round(b.x+b.width/2),y:Math.round(b.y+b.height/2)}}})()");
   window.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...points.a});window.webContents.sendInputEvent({type:'mouseMove',...points.b});window.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...points.b});await until('document.querySelectorAll(".data-cell-dirty").length===3');
   await js('document.querySelector(".data-fill-handle").dispatchEvent(new MouseEvent("dblclick",{bubbles:true}))');assert.equal(await js('document.querySelectorAll(".data-cell-dirty").length'),5);assert.equal(database.exec("SELECT COUNT(*) FROM edits WHERE name='copied'")[0].values[0][0],0);

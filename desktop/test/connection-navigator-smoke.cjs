@@ -74,6 +74,15 @@ app.whenReady().then(async () => {
     await until("document.querySelector('#connection-label').textContent==='Servidor A' && !document.querySelector('#run-query').disabled");
     await js(`document.querySelector('#run-query').click()`);
     await until("document.querySelector('#results tbody td')?.textContent==='test'");
+    await until(`document.querySelector('#query-server option[value="${b.id}"]')`);
+    await js(`(()=>{const picker=document.querySelector('#query-server');picker.value=${JSON.stringify(b.id)};picker.dispatchEvent(new Event('change'));})()`);
+    await until("document.querySelector('#connection-label').textContent==='Servidor B' && !document.querySelector('#run-query').disabled");
+    assert.equal(await js('document.querySelector(".query-tab.active").dataset.id'),aTab.id);
+    await js("document.querySelector('#run-query').click()");
+    await until("document.querySelector('#results tbody td')?.textContent==='asterisk'");
+    await js(`(()=>{const picker=document.querySelector('#query-server');picker.value=${JSON.stringify(a.id)};picker.dispatchEvent(new Event('change'));})()`);
+    await until("document.querySelector('#connection-label').textContent==='Servidor A' && !document.querySelector('#run-query').disabled");
+    assert.equal(await js("document.querySelector('#results tbody td')?.textContent"),'test');
     const before = fixture.queries.length;
     await assert.rejects(js(`window.lqtac.execute('SELECT 1',${JSON.stringify(b.id)})`), /no corresponde/);
     assert.equal(fixture.queries.length, before);

@@ -8,6 +8,12 @@ app.whenReady().then(async()=>{const window=BrowserWindow.getAllWindows()[0];win
   await js(`(()=>{const e=document.querySelector('#query');e.value='SELECT p.no FROM proyectos p';e.focus();e.setSelectionRange(11,11);e.dispatchEvent(new Event('input',{bubbles:true}));})()`);await until('document.querySelector(".completion-option")?.textContent.includes("nombre")');assert.match(await js('document.querySelector(".completion-option").textContent'),/Campo/);
   await js(`document.querySelector('#query').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))`);assert.match(await js('document.querySelector("#query").value'),/p\.`nombre`/);
   const direct=await js(`window.lqtac.columns([{schema:'test',name:'proyectos'}],${JSON.stringify(profile.id)})`);assert.equal(direct[0].columns[1].name,'nombre');
+  await until('document.querySelector(".view-columns[data-object=proyectos]")');
+  await js('document.querySelector(".view-columns[data-object=proyectos]").click()');
+  await until('document.querySelector(".tree-columns")?.textContent.includes("nombre")');
+  assert.equal(await js('document.querySelector(".view-columns[data-object=proyectos]").getAttribute("aria-expanded")'),'true');
+  await js('document.querySelector(".view-columns[data-object=proyectos]").click()');
+  assert.equal(await js('!!document.querySelector(".tree-columns")'),false);
   for(const [type,name,oldText,newText] of [['view','vista','SELECT id,nombre','SELECT id'],['procedure','actualizar','SELECT 1','SELECT 2'],['function','calcular','RETURN n+1','RETURN n+2']]){
     const selector=`.edit-object[data-schema="test"][data-object="${name}"][data-type="${type}"]`;
     await until(`document.querySelector(${JSON.stringify(selector)})`);await js(`document.querySelector(${JSON.stringify(selector)}).click()`);await until('document.querySelector("#object-editor-dialog").open');

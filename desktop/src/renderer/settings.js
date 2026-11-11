@@ -2,21 +2,31 @@ export function initSettings({ api, notify }) {
   const dialog = document.createElement('dialog'); dialog.id = 'settings-dialog';
   dialog.innerHTML = '<form id="settings-form"><h2>Configuración</h2><label class="designer-field">Tiempo máximo de respuesta por consulta (segundos)<input id="query-timeout-seconds" type="number" min="1" max="86400" step="1" required></label><p class="designer-help">Se aplica a cada sentencia enviada a un servidor, incluidas las de un script. Valor inicial: 30 segundos. Los cambios se aplican al siguiente lanzamiento, sin reconectar. SQLite en memoria no utiliza este límite.</p><p class="designer-help">El servidor puede imponer un límite menor. Al agotarse la espera, una escritura puede haberse aplicado; comprueba su estado antes de repetirla.</p><p id="settings-error" role="alert"></p><div class="form-actions"><button type="button" id="reset-query-timeout" class="secondary">Restablecer 30 s</button><button type="button" id="close-settings" class="secondary">Cancelar</button><button type="submit" id="save-settings" class="primary">Guardar</button></div></form>';
   document.body.append(dialog);
+  const statementField=document.createElement('label');statementField.className='designer-field';statementField.innerHTML='Máximo de sentencias por lanzamiento<input id="max-statements" type="number" min="1" max="1000" step="1" required><span class="designer-help">Entre 1 y 1.000 sentencias. Se aplica al siguiente lanzamiento; el tamaño del script sigue limitado a un millón de caracteres.</span>';
+  dialog.querySelector('#settings-error').before(statementField);
+  const appearance=document.createElement('fieldset');appearance.className='appearance-settings';appearance.innerHTML='<legend>Apariencia</legend><div class="appearance-grid"><label>Modo<select id="appearance-mode"><option value="light">Claro</option><option value="dark">Oscuro</option><option value="color">Color</option></select></label><label>Color del entorno<input id="appearance-color" type="color"></label><label>Fuente<select id="appearance-font"></select></label><label>Tamaño del entorno<input id="appearance-size" type="number" min="11" max="20" step="1" required></label></div><p class="designer-help">El modo Color crea tonos oscuros a partir del color elegido. El tamaño ajusta la escala del entorno.</p>';
+  dialog.querySelector('#settings-error').before(appearance);
+  const mode=appearance.querySelector('#appearance-mode'),color=appearance.querySelector('#appearance-color'),font=appearance.querySelector('#appearance-font'),size=appearance.querySelector('#appearance-size');
+  for(const name of window.dbfoxAppearance.fonts){const option=document.createElement('option');option.value=name;option.textContent=name;font.append(option);}
+  const fontStatus=document.createElement('p');fontStatus.className='designer-help';fontStatus.setAttribute('role','status');appearance.append(fontStatus);
+  function setFonts(names,selected){font.replaceChildren();for(const name of names){const option=document.createElement('option');option.value=name;option.textContent=name;font.append(option);}if(!names.includes(selected)){const option=document.createElement('option');option.value=selected;option.textContent=selected+' (fuente guardada)';font.prepend(option);}font.value=selected;}
+  let fontRequest=0;
+  async function loadFonts(){const request=++fontRequest;fontStatus.textContent='Cargando fuentes instaladas…';try{const names=await api.listSystemFonts();if(request!==fontRequest)return;if(!names.length)throw new Error('No se encontraron fuentes.');setFonts(names,font.value||window.dbfoxAppearance.read().font);fontStatus.textContent=`${names.length} fuentes instaladas en este equipo.`;}catch{if(request===fontRequest)fontStatus.textContent='No se pudieron leer las fuentes instaladas; se muestra la selección disponible.';}}
   const toolbar = document.querySelector('.workspace-actions .mini-tools');
   const button = document.createElement('button'); button.id = 'open-settings'; button.className = 'mini-tool'; button.textContent = '⚙'; button.setAttribute('aria-label', 'Configuración'); button.dataset.hint = 'Configuración · Tiempo máximo de respuesta de las consultas'; toolbar.append(button);
-  const input = dialog.querySelector('input'), error = dialog.querySelector('#settings-error');
+  const input = dialog.querySelector('#query-timeout-seconds'), statements = dialog.querySelector('#max-statements'), error = dialog.querySelector('#settings-error');
   const indicator = document.createElement('span'); indicator.id = 'query-timeout-indicator'; indicator.title = 'Tiempo máximo por sentencia enviada al servidor. Se modifica en Configuración.'; document.querySelector('.editor-caption .heading-tools').append(indicator);
-  let current = { queryTimeoutSeconds: 30 }, saving = false;
+  let current = { queryTimeoutSeconds: 30, maxStatements: 1000 }, saving = false;
   const ready = api.getSettings().then(value => { current = value; indicator.textContent = `Límite: ${value.queryTimeoutSeconds} s`; }).catch(problem => { error.textContent = problem.message; notify('No se pudo cargar la configuración.'); });
-  button.onclick = async () => { await ready; input.value = current.queryTimeoutSeconds; error.textContent = ''; dialog.showModal(); input.focus(); };
+  button.onclick = async () => { await ready; input.value = current.queryTimeoutSeconds; statements.value=current.maxStatements; const value=window.dbfoxAppearance.read();mode.value=value.mode;color.value=value.color;if(![...font.options].some(option=>option.value===value.font))setFonts([...font.options].map(option=>option.value),value.font);font.value=value.font;size.value=value.size;error.textContent = ''; dialog.showModal(); input.focus();loadFonts(); };
   dialog.querySelector('#close-settings').onclick = () => { if (!saving) dialog.close(); };
   dialog.querySelector('#reset-query-timeout').onclick = () => { input.value = 30; };
   dialog.addEventListener('cancel', event => { if (saving) event.preventDefault(); });
   dialog.querySelector('form').onsubmit = async event => {
-    event.preventDefault(); if (saving || !input.reportValidity()) return;
-    saving = true; error.textContent = ''; dialog.querySelectorAll('button,input').forEach(node => { node.disabled = true; });
-    try { current = await api.saveSettings({ queryTimeoutSeconds: Number(input.value) }); indicator.textContent = `Límite: ${current.queryTimeoutSeconds} s`; dialog.close(); notify('Configuración guardada. Se aplicará a las próximas consultas.'); }
+    event.preventDefault(); if (saving || !input.reportValidity() || !statements.reportValidity() || !size.reportValidity()) return;
+    saving = true; error.textContent = ''; dialog.querySelectorAll('button,input,select').forEach(node => { node.disabled = true; });
+    try { current = await api.saveSettings({ queryTimeoutSeconds: Number(input.value), maxStatements:Number(statements.value) }); window.dbfoxAppearance.apply({mode:mode.value,color:color.value,font:font.value,size:Number(size.value)});indicator.textContent = `Límite: ${current.queryTimeoutSeconds} s`; dialog.close(); notify('Configuración guardada. Se aplicará a las próximas consultas.'); }
     catch (problem) { error.textContent = problem.message; }
-    finally { saving = false; dialog.querySelectorAll('button,input').forEach(node => { node.disabled = false; }); }
+    finally { saving = false; dialog.querySelectorAll('button,input,select').forEach(node => { node.disabled = false; }); }
   };
 }

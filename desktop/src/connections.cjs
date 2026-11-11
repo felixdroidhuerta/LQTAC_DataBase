@@ -6,6 +6,27 @@ const engines = new Set(['postgresql', 'mysql', 'mariadb', 'sqlserver', 'oracle'
 function validateProfile(input) {
   if (!input || !engines.has(input.engine)) throw new Error('Selecciona un motor válido.');
   const profile = { engine: input.engine };
+  const method = input.method || 'tcp';
+  if (!['tcp','socket','ssh'].includes(method) || (method !== 'tcp' && !['mysql','mariadb'].includes(input.engine))) throw Error('Método de conexión no compatible con este motor.');
+  if(method !== 'tcp') profile.method=method;
+  if(method==='socket') {
+    if(typeof input.socketPath!=='string'||!input.socketPath.trim()||input.socketPath.length>1024)throw Error('Indica la ruta del socket o tubería local.');
+    profile.socketPath=input.socketPath.trim();
+  }
+  if(method==='ssh') {
+    profile.sshAuth=input.sshAuth||'key';
+    if(!['key','password'].includes(profile.sshAuth))throw Error('Autenticación SSH no válida.');
+    for(const key of ['sshHost','sshUser']) {
+      if(typeof input[key]!=='string'||!input[key].trim()||input[key].length>512)throw Error('Completa el campo SSH: '+key);
+      profile[key]=input[key].trim();
+    }
+    profile.sshFingerprint=typeof input.sshFingerprint==='string'?input.sshFingerprint.trim():'';
+    if(profile.sshFingerprint&&!/^SHA256:[A-Za-z0-9+/]{43}=?$/.test(profile.sshFingerprint))throw Error('La huella SSH debe tener formato SHA256:…');
+    profile.sshPort=Number(input.sshPort||22);
+    if(!Number.isInteger(profile.sshPort)||profile.sshPort<1||profile.sshPort>65535)throw Error('Puerto SSH no válido.');
+    profile.sshKeyPath=typeof input.sshKeyPath==='string'?input.sshKeyPath.trim():'';
+    if(profile.sshKeyPath.length>1024)throw Error('Ruta de clave SSH demasiado larga.');
+  }
   for (const key of ['name', 'host', 'username']) {
     const value = key === 'username' && input.engine === 'mongodb' ? input[key] ?? '' : input[key];
     if (typeof value !== 'string' || (!value.trim() && !(key === 'username' && input.engine === 'mongodb')) || value.length > 255) throw new Error(`Campo no válido: ${key}.`);

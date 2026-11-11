@@ -2,3 +2,8 @@
 html[data-theme=dark] .data-edit-status{color:#b4c9dd}#results .data-cell-dirty.cell-selected{outline:2px solid #168bd2;outline-offset:-2px}
 html[data-theme=dark] .mini-tools #edit-result-data:not(:disabled){color:#b9defb}html[data-theme=dark] .mini-tools #edit-result-data[aria-pressed=true]{background:#285476;color:#fff}
 #results .data-cell-editing>.cell-value{visibility:hidden}#results .data-cell-input{position:absolute;inset:0;display:block;width:100%;height:100%;min-width:0;min-height:0;max-height:none;margin:0;padding:6px 10px;box-sizing:border-box;line-height:20px;resize:none;overflow:auto;outline:none}
+.data-row-new>td{box-shadow:inset 0 2px #289c6a}.data-row-deleted>td{text-decoration:line-through;opacity:.7;box-shadow:inset 0 2px #d34b59}
+.mini-tools :is(#add-result-row,#delete-result-row){font-weight:600}.mini-tools :is(#add-result-row,#delete-result-row):disabled{opacity:.72;color:#7891aa}
+.data-change-sql-dialog{width:min(900px,calc(100vw - 44px));max-height:80vh}.data-change-sql-dialog pre{max-height:52vh;overflow:auto;white-space:pre-wrap;margin:14px 0;padding:12px;border:1px solid var(--border);border-radius:6px;background:#f1f5f9;color:#19354c;font:12px/1.55 Consolas,"Cascadia Code",monospace}.data-change-sql-dialog .form-actions{display:flex;justify-content:flex-end;gap:8px}
+html[data-theme=dark] .data-change-sql-dialog pre{background:#101c29;border-color:#385069;color:#d8e5f2}html[data-palette=color] .data-change-sql-dialog pre{background:color-mix(in srgb,var(--surface) 82%,#000);color:var(--text)}
+.data-change-status{font-weight:650;color:#18724a}.data-change-status.data-change-failed{color:#bc3c51}

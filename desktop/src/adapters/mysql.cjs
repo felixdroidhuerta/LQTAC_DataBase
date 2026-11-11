@@ -1,4 +1,5 @@
 const mysql = require('mysql2');
+const {mysqlTransport}=require('./mysql-transport.cjs');
 
 function connectionError(error) {
   const messages = {
@@ -18,27 +19,37 @@ function connectionError(error) {
 
 class MySQLAdapter {
   static async open(profile, password, options = {}) {
+    const transport=await mysqlTransport(profile);
+    try {
     const connection = mysql.createConnection({
       host: profile.host, port: profile.port, user: profile.username,
       password, database: profile.database || undefined, connectTimeout: 10000,
       multipleStatements: false, rowsAsArray: true,
       supportBigNumbers: true, bigNumberStrings: true, dateStrings: true,
       ...(options.charset ? { charset: options.charset } : {}),
-      ...(profile.tls ? { ssl: { rejectUnauthorized: true } } : {})
+      ...(profile.tls ? { ssl: { rejectUnauthorized: true } } : {}),
+      ...transport.options
     });
     const adapter = new MySQLAdapter(connection, profile);
+    adapter.transport=transport;
     try {
       await new Promise((resolve, reject) => connection.connect(error => error ? reject(error) : resolve()));
       return adapter;
     } catch (error) { adapter.close(); throw connectionError(error); }
+    } catch(error){transport.close();throw error;}
   }
 
   constructor(connection, profile) {
     this.connection = connection;
     this.profile = profile;
-    this.alive = true;
-    connection.on('error', () => { this.alive = false; });
+    this._alive = true;
+    connection.on('error', error => { if (error?.fatal) this._alive = false; });
+    connection.on('end', () => { this._alive = false; });
+    connection.stream.on('close', () => { this._alive = false; });
   }
+
+  get alive() { return this._alive && !this.connection._closing && !this.connection.stream.destroyed; }
+  set alive(value) { this._alive = value; }
 
   async schema() {
     try {
@@ -105,6 +116,6 @@ class MySQLAdapter {
     });
   }
 
-  close() { this.alive = false; this.connection.destroy(); this.connection.stream.destroy(); }
+  close() { this.alive = false; this.connection.destroy(); this.connection.stream.destroy(); this.transport?.close(); }
 }
 module.exports = { MySQLAdapter, connectionError };

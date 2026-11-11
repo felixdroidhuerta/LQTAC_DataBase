@@ -53,7 +53,7 @@ async function zip(directory, archive, name) {
     const output = createWriteStream(archive, { flags: 'wx' });
     const bundle = archiver('zip', { zlib: { level: 6 } });
     output.on('close', resolve); output.on('error', reject); bundle.on('error', reject); bundle.on('warning', reject);
-    bundle.pipe(output); bundle.directory(directory, name); bundle.finalize();
+    bundle.pipe(output); bundle.glob('**/*', { cwd: directory, dot: true, ignore: ['Data', 'Data/**'] }, { prefix: name }); bundle.finalize();
   });
 }
 module.exports = { zip };

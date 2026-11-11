@@ -27,7 +27,8 @@ export function initSQLToolbar({ api, notify }) {
   }
   groupTools(document.querySelector('.editor-caption .mini-tools'), [
     ['Archivos SQL', ['#open-sql-file', '#save-sql-file', '#save-sql-as']],
-    ['Formato', ['#format-query']],
+    ['Favoritos', ['#save-sql-favorite','#open-sql-favorites']],
+    ['Formato y vista', ['#format-query','#toggle-line-numbers']],
     ['Ejecución', ['#run-selection', '#run-all', '#stop-query']],
     ['Estructura y relaciones', ['#show-relations']]
   ]);
@@ -35,7 +36,7 @@ export function initSQLToolbar({ api, notify }) {
     ['Copiar', ['#copy-result-cell']], ['Exportar', ['#export-csv', '#export-xlsx', '#export-result-index']],
     ['Filas visibles', ['.results-header label.mini-tool']],
     ['Análisis visual', ['#create-dashboard']],
-    ['Editar datos', ['#edit-result-data','#apply-result-data','#discard-result-data','#null-result-cell']]
+    ['Editar datos', ['#edit-result-data','#add-result-row','#delete-result-row','#apply-result-data','#discard-result-data','#null-result-cell']]
   ]);
   return {
     prepare(value) { active = { ...value, stopping: false }; stop.disabled = true; stop.removeAttribute('aria-busy'); stop.dataset.hint = value.engine === 'sqlite' ? 'SQLite en memoria no admite cancelación durante una consulta' : 'Detener consulta · Cancela la sentencia activa y detiene el resto del script'; },

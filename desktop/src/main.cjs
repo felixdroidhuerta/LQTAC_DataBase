@@ -31,10 +31,12 @@ const {readColumns}=require('./column-metadata.cjs');
 const {inspectObject,buildObjectPlan,routineGrants,applyObject}=require('./object-editor.cjs');
 const {canRestoreDefiner}=require('./mysql-trigger.cjs');
 const {SQLFiles}=require('./sql-files.cjs');
+const {SQLFavorites}=require('./sql-favorites.cjs');
 const {restoreQueryContext}=require('./query-context.cjs');
 const {createHash}=require('node:crypto');
-const {planExecution}=require('./sql-statements.cjs');
+const {planExecution,MAX_STATEMENTS}=require('./sql-statements.cjs');
 const {SettingsStore,executeTimed}=require('./settings.cjs');
+const {listSystemFonts}=require('./system-fonts.cjs');
 const {ResultEdits,decorateResult}=require('./result-edit.cjs');
 const {refreshBoard,refreshQuery}=require('./dashboard-refresh.cjs');
 const {exportPackage,parsePackage,importPackage}=require('./dashboard-transfer.cjs');
@@ -121,9 +123,22 @@ async function activate(next, name, engine = 'sqlite', profileId = null) {
 if (process.platform === 'win32') app.setAppUserModelId('LQTAC.DataBase');
 app.whenReady().then(() => {
   const settings = new SettingsStore(app.getPath('userData'));
+  const favorites = new SQLFavorites(app.getPath('userData'));
+  register('favorites:list',()=>favorites.list());
+  register('favorites:add',(name,sql)=>favorites.add(name,sql));
+  register('favorites:rename',(id,name)=>favorites.rename(id,name));
+  register('favorites:remove',id=>favorites.remove(id));
   const dashboards = new DashboardStore(app.getPath('userData'));
   const dashboardQueries=new DashboardQueryCache(),queryResponses=new QueryResponses();
   const snapshotFor=token=>queryResponses.find(token)||(exportSnapshot?.token===token?exportSnapshot:null);
+  register('results:retain', token => {
+    const previous = snapshotFor(token);
+    const next = exportSnapshot;
+    if (!previous || !next || previous === next || previous.session !== next.session) throw Error('No se pueden conservar resultados de sesiones diferentes.');
+    next.results = [...previous.results, ...next.results];
+    for (const item of resultEdits.sessions.values()) if (item.snapshot === previous) item.snapshot = next;
+    return { results: next.results, offset: previous.results.length };
+  });
   register('results:rename',(token,index,name)=>{const snapshot=snapshotFor(token);if(!snapshot?.results[index]||!Number.isInteger(index)||typeof name!=='string'||!name.trim()||name.length>160)throw Error('El nombre de la respuesta no es válido.');const label=name.trim();snapshot.results[index].label=label;snapshot.results[index].customLabel=true;for(const {snapshot:cached}of dashboardQueries.entries.values())if(cached.token===token&&cached.results[index]){cached.results[index].label=label;cached.results[index].customLabel=true;}return label;});
   register('dashboards:delete',(id,revision)=>dashboards.remove(id,revision));
   register('dashboards:query-remember',(id,token)=>{if(!exportSnapshot||exportSnapshot.token!==token)throw Error('Los resultados han caducado.');queryResponses.remember(id,exportSnapshot);dashboardQueries.remember(id,exportSnapshot);});
@@ -158,6 +173,7 @@ app.whenReady().then(() => {
   register('dashboards:capture',(token,indices)=>snapshotDatasets(snapshotFor(token),token,indices));
   const resultEdits = new ResultEdits();
   register('results:edit-open',(token,index)=>exclusive(async()=>{const snapshot=snapshotFor(token);if(!snapshot||snapshot.session!==adapter||!Number.isInteger(index))throw new Error('El resultado ha caducado. Ejecuta de nuevo la consulta.');return resultEdits.open(snapshot,index,adapter,currentEngine,currentProfileId||'local');}));
+  register('results:edit-preview',request=>exclusive(async()=>{const snapshot=resultEdits.sessions.get(request?.token)?.snapshot;if(!snapshot||snapshotFor(snapshot.token)!==snapshot)throw Error('El resultado ha caducado. Ejecuta de nuevo la consulta.');return resultEdits.preview(request,snapshot,adapter,currentProfileId||'local');}));
   register('results:edit-apply',request=>exclusive(async()=>{
     const source=adapter,engine=currentEngine,key=currentProfileId||'local',runId='data-edit:'+randomUUID(),timeoutMs=settings.get().queryTimeoutSeconds*1000;
     const snapshot=resultEdits.sessions.get(request?.token)?.snapshot;if(!snapshot||snapshotFor(snapshot.token)!==snapshot)throw Error('El resultado ha caducado. Ejecuta de nuevo la consulta.');
@@ -166,6 +182,7 @@ app.whenReady().then(() => {
     return {...result,...databaseStatus()};
   }));
   register('settings:get', () => settings.get());
+  register('settings:fonts', () => listSystemFonts());
   register('app:info', () => ({ version: app.getVersion(), manualVersion: '0.2.5' }));
   register('app:manual', async () => {
     const portable = require('node:fs').existsSync(path.join(path.dirname(process.execPath), 'portable.json'));
@@ -196,7 +213,8 @@ app.whenReady().then(() => {
   const sqlFiles=new SQLFiles(app.getPath('userData'));
   register('sql:open',async()=>{const result=await dialog.showOpenDialog(window,{title:'Abrir archivo SQL',properties:['openFile'],filters:[{name:'Consultas SQL',extensions:['sql']},{name:'Texto',extensions:['txt']}]});return result.canceled?null:sqlFiles.open(result.filePaths[0]);});
   register('sql:save',request=>sqlFiles.save(request,async()=>{const result=await dialog.showSaveDialog(window,{title:'Guardar archivo SQL',defaultPath:'consulta.sql',filters:[{name:'Consultas SQL',extensions:['sql']}]});return result.canceled?null:result.filePath;}));
-  register('clipboard:write',text=>{if(typeof text!=='string'||text.length>8000000)throw new Error('El contenido supera el límite de copia (8 millones de caracteres).');clipboard.writeText(text);return true;});
+  register('clipboard:write',async text=>{if(typeof text!=='string'||text.length>8000000)throw new Error('El contenido supera el límite de copia (8 millones de caracteres).');await clipboard.writeText(text);return true;});
+  register('clipboard:read',async()=>{const text=await clipboard.readText();if(text.length>8000000)throw new Error('El contenido del portapapeles supera el límite permitido.');return text;});
   register('connections:list', () => connections.list());
   register('connections:export', (passphrase) => exclusive(async () => {
     const profiles=await connections.list(), groups=await connections.groups(), passwords=[];
@@ -250,24 +268,28 @@ app.whenReady().then(() => {
     for (const id of removed) closeSession(id);
     return databaseStatus();
   }));
-  async function openProfile(id, password) {
+  async function openProfile(id, password, sshPassword) {
     const profile = (await connections.list()).find(item => item.id === id);
     if (!profile) throw new Error('No se encuentra el perfil de conexión.');
+    if(profile.method==='ssh'&&profile.sshAuth==='password') {
+      if(typeof sshPassword!=='string'||sshPassword.length>4096)throw Error('Introduce una contraseña SSH válida.');
+      profile.sshPassword=sshPassword;
+    }
     const Driver = drivers[profile.engine];
     if (!Driver) throw new Error('Este motor todavía no tiene driver integrado.');
     if (password === null) password = await credentials.get(id);
     if (typeof password !== 'string' || password.length > 4096) throw new Error('Contraseña no válida.');
     const next=await Driver.open(profile,password);authentication.set(next,{profile,password});return {profile,next};
   }
-  register('connections:connect', (id, password, remember) => exclusive(async () => {
+  register('connections:connect', (id, password, remember, sshPassword) => exclusive(async () => {
     rememberActive();
     if (sessions.get(id)?.adapter.alive !== false && sessions.has(id)) return selectSession(id);
-    const { profile, next } = await openProfile(id, password);
+    const { profile, next } = await openProfile(id, password, sshPassword);
     try { if (remember === true && password !== null) await credentials.set(id, password); else if (remember === false) await credentials.remove([id]); } catch (error) { next.close(); throw error; }
     return activate(next, profile.name, profile.engine, profile.id);
   }, {allowPending:true}));
-  register('connections:test', async (id, password) => {
-    const { next } = await openProfile(id, password);
+  register('connections:test', async (id, password, sshPassword) => {
+    const { next } = await openProfile(id, password, sshPassword);
     try { await next.execute(next instanceof MongoDBAdapter ? '{"ping":1}' : next instanceof OracleAdapter ? 'SELECT 1 FROM DUAL' : 'SELECT 1'); return true; } finally { next.close(); }
   });
   register('database:disconnect', () => exclusive(async () => {
@@ -311,15 +333,33 @@ app.whenReady().then(() => {
   }));
   register('query:format', (source,engine) => formatQuery(source,engine));
   register('database:columns',(tables,key)=>exclusive(async()=>{if(!adapter||key!==(currentProfileId||'local'))throw new Error('La conexión de las columnas ha cambiado.');return readColumns(adapter,currentEngine,tables,cachedSchemas);}));
+  register('explorer:columns',(tables,key)=>exclusive(async()=>{
+    rememberActive();
+    const saved=sessions.get(key);
+    if(!saved||saved.adapter.alive===false)throw new Error('La conexión se ha cerrado. Vuelve a conectarla para ver los campos.');
+    if(saved.adapter.pendingExecution)throw new Error('La conexión está ocupada con una consulta. Espera a que termine.');
+    return readColumns(saved.adapter,saved.engine,tables,saved.schemas);
+  },{allowPending:true}));
   register('database:context',(key,context)=>exclusive(async()=>{if(!adapter||key!==(currentProfileId||'local'))throw new Error('La conexión de esta consulta ha cambiado.');if(adapter.pendingExecution)return databaseStatus();const catalog=await restoreQueryContext(adapter,currentEngine,context,cachedSchemas);if(catalog)cachedSchemas=catalog.schemas;currentDatabase=await adapter.currentDatabase?.()||currentDatabase;cachedObjects=cachedSchemas.find(item=>item.name===currentDatabase)?.objects||[];return databaseStatus();},{allowPending:true}));
   function objectTarget(target,key){
-    if(!adapter||adapter.alive===false||key!==(currentProfileId||'local'))throw new Error('La conexión del objeto ha cambiado.');
+    if(!adapter||adapter.alive===false)throw new Error('La conexión con el servidor se ha cerrado. Vuelve a conectarla desde el explorador y abre de nuevo el objeto.');
+    if(key!==(currentProfileId||'local'))throw new Error('La conexión del objeto ha cambiado.');
     if(!target||!['view','procedure','function'].includes(target.type))throw new Error('Selecciona una vista o rutina.');
     const object=cachedSchemas.find(item=>item.name===target.schema)?.objects.find(item=>item.name===target.name&&item.type===target.type&&(!target.oid||String(item.oid)===String(target.oid)));
     if(!object)throw new Error('El objeto no está en el catálogo visible. Recarga el explorador.');
     return {schema:target.schema,name:object.name,type:object.type,oid:object.oid||null};
   }
-  register('object:inspect',(target,key)=>exclusive(async()=>inspectObject(adapter,currentEngine,objectTarget(target,key))));
+  register('object:inspect',(target,key)=>exclusive(async()=>{
+    const checked=objectTarget(target,key);
+    try { return await inspectObject(adapter,currentEngine,checked); }
+    catch(error) {
+      if(adapter.alive===false || /Can't add new command when connection is in closed state/i.test(error.message)) {
+        adapter.alive=false;
+        throw new Error('La conexión con el servidor se ha cerrado. Vuelve a conectarla desde el explorador y abre de nuevo el objeto.');
+      }
+      throw error;
+    }
+  }));
   register('object:preview',(request,key)=>exclusive(async()=>{
     const target=objectTarget(request?.target,key);const original=await inspectObject(adapter,currentEngine,target);
     if(original.version!==request.version)throw new Error('La definición ha cambiado. Recarga antes de revisar.');
@@ -388,12 +428,13 @@ app.whenReady().then(() => {
   register('query:plan',(source,options,key)=>exclusive(async()=>{
     if(!adapter||key!==(currentProfileId||'local'))throw new Error('La conexión de la consulta ha cambiado.');let mode='';
     if(['mysql','mariadb'].includes(currentEngine)){const [rows]=await adapter.connection.promise().query('SELECT @@SESSION.sql_mode AS sql_mode');mode=rows[0][0]||'';}
-    return planExecution(source,options,currentEngine,mode);
+    return planExecution(source,options,currentEngine,mode,settings.get().maxStatements);
   }));
   register('database:batch',(statements,key,limit=1000,context,runId)=>exclusive(async()=>{
     const timeoutMs = settings.get().queryTimeoutSeconds * 1000;
     if(!adapter||key!==(currentProfileId||'local'))throw new Error('La conexión de la consulta ha cambiado.');
-    if(!Array.isArray(statements)||!statements.length||statements.length>100||statements.some(sql=>typeof sql!=='string'||!sql.trim())||statements.reduce((sum,sql)=>sum+sql.length,0)>1000000)throw new Error('El lanzamiento supera 100 sentencias o un millón de caracteres.');
+    const maxStatements=settings.get().maxStatements;
+    if(!Array.isArray(statements)||!statements.length||statements.length>maxStatements||statements.some(sql=>typeof sql!=='string'||!sql.trim())||statements.reduce((sum,sql)=>sum+sql.length,0)>1000000)throw new Error(`El lanzamiento supera ${maxStatements} sentencias o un millón de caracteres. El máximo de sentencias se puede cambiar en Configuración.`);
     if(![0,50,100,500,1000].includes(limit)||typeof runId!=='string'||runId.length>100)throw new Error('Opciones de ejecución no válidas.');
     const execution = {runId,key,engine:currentEngine,controller:new AbortController()}; activeExecution = execution;
     try {
@@ -407,7 +448,7 @@ app.whenReady().then(() => {
         const output=visibleResults(await executeTimed(adapter,currentEngine,sql,timeoutMs,{rowLimit:limit,signal:execution.controller.signal,openControl:controlFor(adapter),runId,onCancellationReleased:()=>window?.webContents.send('execution:released',{runId,key})}),limit);const size=Buffer.byteLength(JSON.stringify(output.results));
         if(output.results.length===1)decorateResult(output.results[0],{sql,engine:currentEngine,database:currentDatabase||'main',adapter,scopeKnown});
         if(!/^\s*SELECT\b/i.test(sql))scopeKnown=false;
-        if(retained+size>32000000||results.length+output.results.length>200)throw new Error('El script supera 32 MB o 200 resultados. La sentencia ya se envió al servidor; reduce los resultados antes de repetirla.');retained+=size;changes+=output.changes||0;
+        if(retained+size>32000000||results.length+output.results.length>MAX_STATEMENTS)throw new Error(`El script supera 32 MB o ${MAX_STATEMENTS} resultados. La sentencia ya se envió al servidor; reduce los resultados antes de repetirla.`);retained+=size;changes+=output.changes||0;
         if(output.results.length)output.results.forEach((result,i)=>results.push({...result,label:`Respuesta ${results.length+1}`,statementIndex:index,sql,elapsed:output.elapsed}));
         else results.push({columns:[],values:[],label:`Respuesta ${results.length+1}`,statementIndex:index,sql,elapsed:output.elapsed,message:`Sentencia ejecutada. ${output.changes||0} filas modificadas.`});
         const item={index,sql,time,status:'success',duration:output.elapsed,rows:output.results.reduce((sum,item)=>sum+item.values.length,0),changes:output.changes||0,truncated:output.results.some(item=>item.truncated)};statementOutputs.push(item);progress({...item,phase:'finish'});

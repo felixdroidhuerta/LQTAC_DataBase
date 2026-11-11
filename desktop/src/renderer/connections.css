@@ -3,3 +3,6 @@
 
 #credentials-form > .tls-option { flex-direction: row; align-items: center; gap: 8px; line-height: 1.6; }
 #credentials-form > .tls-option input[type=checkbox] { width: auto; margin: 0; flex: 0 0 auto; }
+.form-columns[hidden],#connection-method-field[hidden],#connection-socket-field[hidden],#connection-ssh-fields[hidden]{display:none}#connection-dialog{max-height:90vh;overflow-y:auto}#connection-ssh-fields{margin-top:16px;padding:12px;border:1px solid var(--border);border-radius:6px}#connection-ssh-fields legend{font-size:12px}#connection-ssh-fields .designer-field{margin-top:12px}
+#credentials-form>#ssh-password-field[hidden],#ssh-key-field[hidden]{display:none}
+#query-server{display:block;max-width:320px;margin:5px 0;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font:inherit;color:inherit;background:transparent}

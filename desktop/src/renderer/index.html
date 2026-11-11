@@ -25,6 +25,8 @@
   <link rel="stylesheet" href="settings.css">
   <link rel="stylesheet" href="result-editor.css">
   <link rel="stylesheet" href="dashboard.css">
+  <link rel="stylesheet" href="appearance.css">
+  <link rel="stylesheet" href="sql-favorites.css">
 </head>
 <body>
   <aside class="rail"><div class="monogram"><img src="../../../assets/branding/app-icon.png" alt="LQTAC dbFox"></div><button class="rail-button active" data-view="home" title="Inicio">⌂</button><button class="rail-button" data-view="connections" title="Conexiones" aria-label="Conexiones">⇄</button><button class="rail-button" data-view="sql" title="Editor SQL">⌘</button><button class="rail-button" data-view="modules" title="Módulos">▦</button><span class="rail-bottom">0.1</span></aside>
@@ -61,7 +63,7 @@
       <div class="note"><span>◈</span><p><strong>Conexiones a servidor</strong><br>Todos los motores del selector disponen de controlador. Configura el servidor y pulsa «Conectar» para autenticarte.</p></div>
     </section>
     <section id="sql" class="view hidden">
-      <div class="editor-toolbar"><label>Servidor / conexión <strong id="connection-label">Sin conexión</strong><span id="active-database"></span></label><div><button id="disconnect-db" class="secondary hidden">Desconectar</button><button id="export-db" class="secondary">Guardar copia</button><button id="run-query" class="primary">▶ &nbsp; Ejecutar <kbd>Ctrl ↵</kbd></button></div></div>
+      <div class="editor-toolbar"><label>Servidor / conexión <strong id="connection-label">Sin conexión</strong><span id="active-database"></span></label><div id="context-help" class="context-help" aria-live="polite" aria-label="Ayuda contextual"></div><div><button id="disconnect-db" class="secondary hidden">Desconectar</button><button id="export-db" class="secondary">Guardar copia</button><button id="run-query" class="primary">▶ &nbsp; Ejecutar <kbd>Ctrl ↵</kbd></button></div></div>
       <div id="sql-stage"><div id="query-workspace">
       <div class="editor-caption"><div class="heading-tools"><span id="sql-dialect">SQL / SQLite</span><div class="mini-tools" role="toolbar" aria-label="Herramientas de consulta"><button id="format-query" class="mini-tool" aria-label="Pretty Formatter" data-hint="Pretty Formatter · Formatea la selección o toda la consulta sin ejecutarla">{ }</button><button id="run-selection" class="mini-tool" aria-label="Ejecutar selección" data-hint="Ejecutar selección · Ejecuta únicamente el texto seleccionado">▷</button><button id="show-relations" class="mini-tool" aria-label="Relaciones entre tablas" data-hint="Relaciones · Ver claves foráneas de la base o esquema seleccionado">♧</button></div></div><span id="draft-status">Borrador local</span></div>
       <div class="query-editor">
@@ -109,7 +111,17 @@
       <input type="hidden" name="id">
       <label>Nombre de la conexión<input name="name" required maxlength="255" placeholder="Mi servidor de desarrollo"></label>
       <label>Motor<select name="engine"><option value="postgresql">PostgreSQL</option><option value="mysql">MySQL</option><option value="mariadb">MariaDB</option><option value="clickhouse">ClickHouse</option><option value="mongodb">MongoDB</option><option value="sqlserver">SQL Server</option><option value="oracle">Oracle</option></select></label>
-      <div class="form-columns"><label>Servidor<input name="host" required maxlength="255" placeholder="localhost"></label><label class="port-field">Puerto<input name="port" type="number" min="1" max="65535" value="5432" required></label></div>
+      <label id="connection-method-field">Método de conexión<select name="method"><option value="tcp">Estándar (TCP/IP)</option><option value="socket">Socket local / tubería</option><option value="ssh">TCP/IP sobre SSH</option></select></label>
+      <label id="connection-socket-field" hidden>Socket o tubería local<input name="socketPath" maxlength="1024" placeholder="\\\\.\\pipe\\MySQL"></label>
+      <fieldset id="connection-ssh-fields" hidden><legend>Túnel SSH</legend>
+        <div class="form-columns"><label>Servidor SSH<input name="sshHost" maxlength="255"></label><label class="port-field">Puerto SSH<input name="sshPort" type="number" min="1" max="65535" value="22"></label></div>
+        <label class="designer-field">Usuario SSH<input name="sshUser" maxlength="255" autocomplete="off"></label>
+        <label class="designer-field">Autenticación SSH<select name="sshAuth"><option value="key">Clave privada / agente SSH</option><option value="password">Usuario y contraseña</option></select></label>
+        <label class="designer-field" id="ssh-key-field">Archivo de clave privada (opcional)<input name="sshKeyPath" maxlength="1024" placeholder="Ruta completa; vacío para usar el agente SSH"></label>
+        <p id="ssh-auth-hint" class="designer-help"></p>
+        <details id="ssh-verification"><summary>Verificación del servidor SSH (opcional)</summary><label class="designer-field">Huella del servidor SSH (opcional)<input name="sshFingerprint" maxlength="512" placeholder="Vacío: confirmar identidad en la primera conexión"></label><p class="designer-help">Puedes indicar una huella SHA256 conocida. Si lo dejas vacío, se pedirá confirmar la identidad del servidor al conectar por primera vez y se recordará en este equipo.</p></details>
+      </fieldset>
+      <div class="form-columns"><label>Servidor de base de datos<input name="host" required maxlength="255" placeholder="localhost"></label><label class="port-field">Puerto<input name="port" type="number" min="1" max="65535" value="5432" required></label></div>
       <label><span id="database-field-label">Base de datos predeterminada (opcional)</span><input name="database" maxlength="255" placeholder="Vacío para explorar todas las bases disponibles"></label>
       <label>Usuario<input name="username" required maxlength="255" autocomplete="off" placeholder="Usuario del servidor"></label>
       <label id="mongo-auth-source" class="hidden">Base de autenticación (authSource)<input name="authSource" maxlength="255" placeholder="admin"></label>
@@ -124,6 +136,7 @@
       <div class="eyebrow">AUTENTICACIÓN</div><h2 id="credentials-heading">Conectar</h2>
       <p id="credentials-target"></p>
       <label>Contraseña<input id="connection-password" type="password" maxlength="4096" autocomplete="off"></label>
+      <label id="ssh-password-field" hidden>Contraseña SSH<input id="ssh-password" type="password" maxlength="4096" autocomplete="off"><small>Se utiliza durante esta sesión.</small></label>
       <label class="tls-option"><input id="remember-password" type="checkbox"> Recordar contraseña en este equipo</label><p id="credentials-hint" class="profile-hint">La contraseña se guarda cifrada.</p>
       <p id="credentials-message" role="status" aria-live="polite"></p>
       <div class="form-actions"><button type="button" id="cancel-credentials" class="secondary">Cancelar</button><button type="button" id="test-connection" class="secondary">Probar conexión</button><button type="submit" class="primary">Conectar</button></div>

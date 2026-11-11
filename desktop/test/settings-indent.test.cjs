@@ -8,7 +8,12 @@ test('settings validate bounds, survive restart and preserve the last saved valu
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'lqtac-settings-'));
   try {
     const store = new SettingsStore(directory); assert.equal(store.get().queryTimeoutSeconds, 30);
+    assert.equal(store.get().maxStatements, 1000);
+    store.save({queryTimeoutSeconds:30,maxStatements:250});
+    assert.equal(new SettingsStore(directory).get().maxStatements,250);
     store.save({ queryTimeoutSeconds: 120 }); assert.equal(new SettingsStore(directory).get().queryTimeoutSeconds, 120);
+    assert.equal(store.get().maxStatements,250);
+    for (const invalid of [0,1001,1.5,'5']) assert.throws(()=>store.save({maxStatements:invalid}));
     for (const invalid of [0, -1, 1.5, '60', NaN, 86401, null]) assert.throws(() => store.save({ queryTimeoutSeconds: invalid }));
     assert.equal(store.get().queryTimeoutSeconds, 120);
     fs.writeFileSync(path.join(directory, 'settings.json'), 'broken'); assert.equal(new SettingsStore(directory).get().queryTimeoutSeconds, 30);
