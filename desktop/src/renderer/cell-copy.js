@@ -6,7 +6,7 @@ export function parseClipboardRows(input){
   for(let i=0;i<input.length;i++){const c=input[i];if(quoted){if(c==='"'&&input[i+1]==='"'){value+='"';i++;}else if(c==='"')quoted=false;else value+=c;}else if(c==='"'&&!value)quoted=true;else if(c===delimiter){row.push(value);value='';}else if(c==='\r'||c==='\n'){row.push(value);rows.push(row);row=[];value='';if(c==='\r'&&input[i+1]==='\n')i++;}else value+=c;}
   if(quoted)throw Error('El texto del portapapeles contiene comillas sin cerrar.');if(value||row.length)rows.push([...row,value]);return rows;
 }
-export function attachCellCopy(container,{api,notify,button,getColumns,onPasteRows}={}){
+export function attachCellCopy(container,{api,notify,button,getColumns,onPasteRows,prepareEdit}={}){
   if(button)button.dataset.localAction='true';
   let selected=null,key=null,anchor=null;const selectedRows=new Set();const menu=node('div');menu.className='cell-copy-menu';menu.hidden=true;menu.setAttribute('role','menu');
   const detail=node('dialog');detail.className='cell-detail-dialog';const heading=node('h2','Contenido de la celda');const area=node('textarea');area.readOnly=true;area.wrap='off';area.setAttribute('aria-label','Contenido completo de la celda');const actions=node('div');const copy=node('button','Copiar contenido');copy.className='primary';const close=node('button','Cerrar');close.className='secondary';close.onclick=()=>detail.close();actions.append(close,copy);detail.append(heading,area,actions);document.body.append(menu,detail);
@@ -19,7 +19,22 @@ export function attachCellCopy(container,{api,notify,button,getColumns,onPasteRo
   function select(cell,focus=false,event=null){if(!cell||!container.contains(cell))return;if(selected?.isConnected)selected.tabIndex=-1;selected=cell;key=identify(cell);const row=rowId(cell),rows=[...container.querySelectorAll('tbody tr')].map(item=>Number(item.dataset.rowIndex));if(!event?.__dbfoxRows){if(event?.shiftKey&&anchor!==null){if(!event.ctrlKey&&!event.metaKey)selectedRows.clear();const a=rows.indexOf(anchor),b=rows.indexOf(row);for(const id of rows.slice(Math.min(a,b),Math.max(a,b)+1))selectedRows.add(id);}else if(event?.ctrlKey||event?.metaKey){if(selectedRows.has(row))selectedRows.delete(row);else selectedRows.add(row);anchor=row;}else{selectedRows.clear();selectedRows.add(row);anchor=row;}if(event)event.__dbfoxRows=true;}if(!selectedRows.size)selectedRows.add(row);paint();sync();if(focus)cell.focus({preventScroll:true});}
   function copyCell(){if(alive())return write(text(selected));notify?.('Selecciona una celda primero.');}
   function copyRows(separator='\t',headers=false){if(!alive())return;const line=values=>values.map(value=>quote(String(value),separator)).join(separator),names=getColumns?.()||[...container.querySelectorAll('thead th')].map(th=>th.textContent.trim());const rows=[...selectedRows].sort((a,b)=>a-b).map(row=>[...container.querySelector(`tr[data-row-index="${row}"]`).cells].map(cell=>String(text(cell))));return write((headers?[line(names)]:[]).concat(rows.map(line)).join('\r\n'));}
-  function show(){if(!alive())return;area.value=String(text(selected));if(!detail.open)detail.showModal();area.focus();}
+  const editContent=node('button','Editar contenido');editContent.className='secondary';editContent.hidden=!prepareEdit;
+  const stageContent=node('button','Dejar cambio pendiente');stageContent.className='primary';stageContent.hidden=true;
+  const hint=node('p','');hint.className='designer-help';detail.insertBefore(hint,actions);actions.prepend(editContent,stageContent);
+  let detailCell=null,saveContent=null,initialValue='';
+  function show(){if(!alive())return;detailCell=selected;saveContent=null;area.readOnly=true;area.value=String(text(selected));initialValue=area.value;editContent.hidden=!prepareEdit;editContent.disabled=false;stageContent.hidden=true;hint.textContent='';if(!detail.open)detail.showModal();area.focus();}
+  editContent.onclick=async()=>{
+    editContent.disabled=true;
+    try{saveContent=await prepareEdit(detailCell);area.readOnly=false;editContent.hidden=true;stageContent.hidden=false;hint.textContent='El cambio quedará pendiente en la tabla. Usa Aplicar cambios para guardarlo en el servidor.';area.focus();}
+    catch(error){hint.textContent=error.message;}
+    finally{editContent.disabled=false;}
+  };
+  stageContent.onclick=()=>{
+    try{if(area.value!==initialValue)saveContent(area.value);detail.close();}
+    catch(error){hint.textContent=error.message;}
+  };
+  detail.addEventListener('close',()=>{saveContent=null;detailCell=null;});
   copy.onclick=()=>write(area.value);
   const add=(label,action)=>{const item=node('button',typeof label==='function'?label():label);item.type='button';item.setAttribute('role','menuitem');item.onclick=()=>{menu.hidden=true;Promise.resolve(action()).catch(error=>notify?.(error.message));};menu.append(item);};
   const separator=()=>{const line=node('div');line.className='cell-menu-separator';line.setAttribute('role','separator');menu.append(line);};

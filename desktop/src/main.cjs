@@ -172,12 +172,30 @@ app.whenReady().then(() => {
   },{allowPending:true}));
   register('dashboards:capture',(token,indices)=>snapshotDatasets(snapshotFor(token),token,indices));
   const resultEdits = new ResultEdits();
-  register('results:edit-open',(token,index)=>exclusive(async()=>{const snapshot=snapshotFor(token);if(!snapshot||snapshot.session!==adapter||!Number.isInteger(index))throw new Error('El resultado ha caducado. Ejecuta de nuevo la consulta.');return resultEdits.open(snapshot,index,adapter,currentEngine,currentProfileId||'local');}));
+  register('results:edit-open',(token,index)=>exclusive(async()=>{
+    const snapshot=snapshotFor(token);
+    if(!snapshot||snapshot.session!==adapter||!Number.isInteger(index))throw new Error('El resultado ha caducado. Ejecuta de nuevo la consulta.');
+    const source=adapter,engine=currentEngine,key=currentProfileId||'local';
+    return executeTimed(source,engine,'Preparar edición de datos',settings.get().queryTimeoutSeconds*1000,{
+      openControl:controlFor(source),runId:'edit-open:'+randomUUID(),
+      execute:(_sql,{signal})=>resultEdits.open(snapshot,index,source,engine,key,signal)
+    });
+  }));
   register('results:edit-preview',request=>exclusive(async()=>{const snapshot=resultEdits.sessions.get(request?.token)?.snapshot;if(!snapshot||snapshotFor(snapshot.token)!==snapshot)throw Error('El resultado ha caducado. Ejecuta de nuevo la consulta.');return resultEdits.preview(request,snapshot,adapter,currentProfileId||'local');}));
   register('results:edit-apply',request=>exclusive(async()=>{
     const source=adapter,engine=currentEngine,key=currentProfileId||'local',runId='data-edit:'+randomUUID(),timeoutMs=settings.get().queryTimeoutSeconds*1000;
     const snapshot=resultEdits.sessions.get(request?.token)?.snapshot;if(!snapshot||snapshotFor(snapshot.token)!==snapshot)throw Error('El resultado ha caducado. Ejecuta de nuevo la consulta.');
-    const result=await resultEdits.apply(request,snapshot,source,key,async(_item,write)=>executeTimed(source,engine,'Aplicar cambios de datos',timeoutMs,{openControl:controlFor(source),runId,onCancellationReleased:()=>window?.webContents.send('execution:released',{runId,key}),execute:async()=>{if(engine==='postgresql'){await source.client.query('SET statement_timeout TO '+timeoutMs);source.queryTimeoutMs=timeoutMs;}return write();}}),state=>{if(window&&!window.isDestroyed())window.webContents.send('results:edit-progress',{token:request.token,...state});});
+    const executeEdit=async(_item,write)=>executeTimed(source,engine,'Aplicar cambios de datos',timeoutMs,{
+      openControl:controlFor(source),runId,
+      onCancellationReleased:()=>window?.webContents.send('execution:released',{runId,key}),
+      execute:async(_sql,{signal})=>{
+        if(engine==='postgresql'){await source.client.query('SET statement_timeout TO '+timeoutMs);source.queryTimeoutMs=timeoutMs;}
+        signal?.throwIfAborted();return write(signal);
+      }
+    });
+    const result=await resultEdits.apply(request,snapshot,source,key,executeEdit,state=>{
+      if(window&&!window.isDestroyed())window.webContents.send('results:edit-progress',{token:request.token,...state});
+    },read=>executeEdit(null,read));
     for(const [id,item]of [...dashboardQueries.entries])if(item.snapshot.token===snapshot.token){try{dashboardQueries.remember(id,snapshot);}catch{dashboardQueries.forget(id);}break;}
     return {...result,...databaseStatus()};
   }));

@@ -1,12 +1,34 @@
 const make=(tag,text,cls)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(cls)node.className=cls;return node;};
-export function createResultEditor({root,api,notify,runTask,onStatus,getOutput,getIndex,render,getVisibleRows,selectCell}){
+export function createResultEditor({root,api,notify,runTask,onStatus,getOutput,getIndex,render,getVisibleRows,getSelectedRows,selectCell}){
   const toolbar=document.querySelector('.results-header .mini-tools'),states=new Map();let active=null,input=null,drag=null,saving=false,opening=false;
   const status=make('span','','data-edit-status');status.id='data-edit-status';document.querySelector('.results-header .heading-tools').append(status);
   const audit=make('dialog',undefined,'data-change-sql-dialog');audit.innerHTML='<h2></h2><p class="data-change-status"></p><p class="designer-help">Este es el SQL de auditoría. dbFox añade comprobaciones de concurrencia para evitar sobrescribir una fila que haya cambiado desde la consulta.</p><pre></pre><div class="form-actions"><button type="button" class="secondary">Cerrar</button></div>';document.body.append(audit);audit.querySelector('button').onclick=()=>audit.close();
+  const confirmApply=make('button','Aplicar','primary');
+  confirmApply.type='button';confirmApply.id='confirm-result-changes';confirmApply.hidden=true;
+  audit.querySelector('.form-actions').append(confirmApply);
+  function reviewChanges(preview,request,state){
+    audit.querySelector('h2').textContent='Revisar cambios antes de aplicar';
+    const message=audit.querySelector('.data-change-status');
+    message.textContent='Cambios pendientes de ejecutar en el servidor.';
+    if(request.deletes?.length){
+      const identities=request.deletes.map(row=>state.columns.map((column,index)=>column.primary?`${column.name}=${String(state.base[row][index])}`:null).filter(Boolean).join(', '));
+      audit.querySelector('h2').textContent='Confirmar eliminación de filas';
+      message.textContent=`Se eliminarán ${request.deletes.length} filas de ${state.target}. Filas seleccionadas: ${identities.slice(0,100).join(' · ')}${identities.length>100?' · Consulta el SQL para ver todas las filas.':''}`;
+    }
+    message.classList.remove('data-change-failed');
+    audit.querySelector('pre').textContent=preview.statements.join('\n\n');
+    confirmApply.hidden=false;
+    return new Promise(resolve=>{
+      let confirmed=false;
+      confirmApply.onclick=()=>{confirmed=true;audit.close();};
+      audit.onclose=()=>{confirmApply.hidden=true;confirmApply.onclick=null;audit.onclose=null;resolve(confirmed);};
+      audit.showModal();
+    });
+  }
   const button=(id,text,label,action)=>{const node=make('button',text,'mini-tool');node.id=id;node.type='button';node.setAttribute('aria-label',label);node.dataset.hint=label;node.onclick=action;toolbar.append(node);return node;};
   const edit=button('edit-result-data','✎ Editar datos','Editar registros de la tabla',()=>open());
   const add=button('add-result-row','＋ Añadir fila','Añadir una fila pendiente. Activa la edición si todavía no está abierta.',()=>addRow());
-  const remove=button('delete-result-row','− Quitar fila','Marcar o desmarcar la fila seleccionada para borrar',()=>deleteRow());
+  const remove=button('delete-result-row','− Quitar fila','Eliminar las filas seleccionadas tras revisar y confirmar su SQL',()=>deleteRow());
   const apply=button('apply-result-data','✓ Aplicar cambios','Guardar en la tabla los cambios pendientes',()=>save());
   const discard=button('discard-result-data','↶ Descartar','Descartar los cambios pendientes de este resultado',()=>reset());
   const nullButton=button('null-result-cell','NULL','Asignar NULL real a la celda seleccionada',()=>{const s=current();if(active&&s?.columns[active.column].nullable){stage(active.row,active.column,null);render();}});
@@ -16,14 +38,38 @@ export function createResultEditor({root,api,notify,runTask,onStatus,getOutput,g
   const editable=(s,row,column)=>!s?.deleted.has(row)&&(s?.newRows.has(row)?s.columns[column]?.insertable:s?.columns[column]?.editable);
   const cell=(row,column)=>root.querySelector(`tr[data-row-index="${row}"]`)?.cells[column];
   function hasChanges(){return [...states.values()].some(s=>pending(s));}
-  function sync(){const s=current(),data=result();edit.disabled=saving||opening||!data?.editContext;edit.setAttribute('aria-pressed',String(!!s?.enabled));edit.dataset.hint=data?.editContext?'Editar datos · Doble clic o F2 para editar una celda. Los cambios se guardan al pulsar Aplicar cambios':'Edición disponible en SELECT * de una tabla con clave primaria · MySQL, MariaDB, PostgreSQL y SQLite';add.disabled=saving||opening||!data?.editContext||!!s?.invalid;remove.disabled=saving||opening||!s?.enabled||!active||!!s?.invalid;apply.disabled=saving||!pending(s)||s.invalid;discard.disabled=saving||!pending(s);nullButton.disabled=saving||!s?.enabled||!active||!editable(s,active.row,active.column)||!s.columns[active.column]?.nullable;status.textContent=s?`${s.target} · ${pending(s)} cambios pendientes${s.invalid?' · vuelve a consultar':''}`:'';root.classList.toggle('data-edit-mode',!!s?.enabled);document.dispatchEvent(new Event('lqtac:data-changed'));}
+  function sync(){
+    const s=current(),data=result();
+    edit.disabled=saving||opening||!data?.editContext;
+    edit.setAttribute('aria-pressed',String(!!s?.enabled));
+    edit.dataset.hint=data?.editContext?'Editar datos · Doble clic o F2 para editar una celda. Los cambios se guardan al pulsar Aplicar cambios':'Edición disponible en SELECT * de una tabla con clave primaria · MySQL, MariaDB, PostgreSQL y SQLite';
+    add.disabled=saving||opening||!data?.editContext||!!s?.invalid;
+    remove.disabled=saving||opening||!data?.editContext||!active||!!s?.invalid;
+    apply.disabled=saving||!pending(s)||!!s?.invalid;
+    discard.disabled=saving||!pending(s);
+    nullButton.disabled=saving||!s?.enabled||!active||!editable(s,active.row,active.column)||!s.columns[active.column]?.nullable;
+    status.textContent=opening?'Preparando edición de la tabla…':saving?'Preparando cambios…':s?`${s.target} · ${pending(s)} cambios pendientes${s.invalid?' · vuelve a consultar':''}`:'';
+    root.classList.toggle('data-edit-mode',!!s?.enabled);
+    document.dispatchEvent(new Event('lqtac:data-changed'));
+  }
   async function open(){if(saving||opening)return;const existing=current();if(existing){existing.enabled=!existing.enabled;render();return;}const output=getOutput(),index=getIndex();if(!output?.results[index]?.editContext)return;opening=true;sync();try{await runTask(async()=>{const info=await api.openResultEdit(output.exportToken,index);if(getOutput()!==output||getIndex()!==index)return;states.set(index,{...info,base:structuredClone(result().values),changes:new Map(),newRows:new Set(),deleted:new Set(),enabled:true,invalid:false});render();notify('Edición de datos activada. Los cambios se guardan al pulsar Aplicar cambios.');});}finally{opening=false;sync();}}
   async function openCell(td,initial){if(!td||saving||opening||!result()?.editContext)return;const output=getOutput(),index=getIndex(),row=Number(td.parentElement.dataset.rowIndex),column=td.cellIndex;if(!current()?.enabled)await open();if(getOutput()!==output||getIndex()!==index||!current()?.enabled)return;if(!editable(current(),row,column)){notify('Esta columna es de solo lectura.');return;}start(cell(row,column),initial);}
   function stage(row,column,value){const s=current();if(!s?.enabled||saving||!editable(s,row,column))return;const base=s.base[row][column],same=!s.newRows.has(row)&&(value===null?base===null:base!==null&&String(value)===String(base));const key=`${row}:${column}`;if(same){s.changes.delete(key);result().values[row][column]=base;}else{s.changes.set(key,value);result().values[row][column]=value;}sync();}
   async function ensureEditing(){if(!current()?.enabled)await open();return current()?.enabled&&!current().invalid;}
   async function addRow(values){if(!await ensureEditing())return;const s=current(),row=result().values.length,blank=s.columns.map(()=>null);s.newRows.add(row);s.base.push([...blank]);result().values.push([...blank]);if(values)values.forEach((value,column)=>{const c=s.columns[column];if(c.insertable&&!c.auto)stage(row,column,value);});render();notify(values?'Fila pegada. Revisa los valores y pulsa Aplicar cambios. Para un NULL real usa el botón NULL.':'Fila nueva preparada. Los campos sin valor usan el valor predeterminado de la tabla.');}
   function shiftRows(s,row){s.base.splice(row,1);result().values.splice(row,1);s.newRows=new Set([...s.newRows].filter(i=>i!==row).map(i=>i>row?i-1:i));s.deleted=new Set([...s.deleted].filter(i=>i!==row).map(i=>i>row?i-1:i));s.changes=new Map([...s.changes].map(([key,value])=>{const [r,c]=key.split(':').map(Number);return r===row?null:[`${r>row?r-1:r}:${c}`,value];}).filter(Boolean));active=null;}
-  function deleteRow(){const s=current();if(!s?.enabled||!active||saving)return;commit();const row=active.row;if(s.newRows.has(row)){shiftRows(s,row);notify('Fila nueva descartada.');}else if(s.deleted.has(row))s.deleted.delete(row);else{s.deleted.add(row);for(const key of [...s.changes.keys()])if(key.startsWith(row+':'))s.changes.delete(key);result().values[row]=structuredClone(s.base[row]);}render();}
+  async function deleteRow(){
+    if(saving||opening||!active)return;
+    try{
+    commit();
+    const rows=[...new Set(getSelectedRows?.()||[active.row])];
+    if(!rows.length||!await ensureEditing())return;
+    const s=current();
+    const existing=rows.filter(row=>!s.newRows.has(row));
+    if(existing.length)await save({token:s.token,changes:[],inserts:[],deletes:existing});
+    else notify('Las filas nuevas todavía no existen en el servidor. Usa Descartar para quitarlas.');
+    }catch(error){notify(error.message);}
+  }
   function select(td,event){if(!td)return;selectCell?.(td,false,event);active={row:Number(td.parentElement.dataset.rowIndex),column:td.cellIndex};root.querySelectorAll('.data-fill-handle').forEach(node=>node.remove());const s=current();if(s?.enabled&&editable(s,active.row,active.column)&&!saving&&!input){const handle=make('button','','data-fill-handle');handle.type='button';handle.setAttribute('aria-label','Autorrellenar columna');handle.title='Arrastra para copiar el valor. Doble clic: rellenar esta columna en todas las filas visibles.';td.append(handle);}sync();}
   function start(td,initial){const s=current(),row=Number(td?.parentElement?.dataset.rowIndex);if(!td||!s?.enabled||!editable(s,row,td.cellIndex)||saving)return;commit();select(td);const column=td.cellIndex,value=result().values[row][column];const editor=make('textarea',undefined,'data-cell-input');editor.rows=1;editor.wrap='off';editor.value=initial===undefined?(value===null?'':String(value)):initial;editor.placeholder=value===null?(s.newRows.has(row)?'Valor predeterminado':'NULL (valor nulo)'):'';editor.setAttribute('aria-label','Editar '+s.columns[column].name);input={editor,row,column};td.classList.add('data-cell-editing');td.append(editor);editor.focus();editor.setSelectionRange(editor.value.length,editor.value.length);editor.onblur=()=>commit();}
   function commit(cancel=false){if(!input)return;const editing=input;input=null;if(!cancel)stage(editing.row,editing.column,editing.editor.value);render();}
@@ -34,7 +80,42 @@ export function createResultEditor({root,api,notify,runTask,onStatus,getOutput,g
   function restore(saved){states.clear();for(const item of saved||[]){if(!Number.isInteger(item?.index)||!Array.isArray(item.base)||!Array.isArray(item.changes))continue;states.set(item.index,{...item,base:structuredClone(item.base),changes:new Map(item.changes),newRows:new Set(item.newRows||[]),deleted:new Set(item.deleted||[])});}active=null;}
   function requestFor(s){const all=changes(s);return {token:s.token,changes:all.filter(c=>!s.newRows.has(c.row)),deletes:[...s.deleted],inserts:[...s.newRows].map(row=>({row,values:all.filter(c=>c.row===row).map(({column,value})=>({column,value}))}))};}
   function showSQL(preview,response){const applied=response.applied.length+(response.deleted||[]).length+(response.inserted||[]).length,requested=preview.statements.length,title=audit.querySelector('h2'),status=audit.querySelector('.data-change-status');title.textContent=response.error?'Cambios aplicados parcialmente':'Cambios aplicados a la tabla';status.textContent=response.error?`Se aplicaron ${applied} de ${requested} cambios. El resto no se aplicó: ${response.error}`:`Se aplicaron correctamente ${applied} cambio${applied===1?'':'s'} en la base de datos.`;status.classList.toggle('data-change-failed',!!response.error);audit.querySelector('pre').textContent=preview.statements.join('\n\n');if(!audit.open)audit.showModal();if(response?.error)notify(`Aplicación parcial: ${response.error}`);}
-  async function save(){commit();const s=current(),data=result();if(!pending(s)||saving||s.invalid)return;const request=requestFor(s);let preview;try{preview=await api.previewResultEdits(request);}catch(error){notify(error.message);return;}saving=true;sync();const unsubscribe=api.onResultEditProgress(item=>{if(item.token===s.token)status.textContent=`${s.target} · Aplicando ${item.completed}/${item.total} filas…`;});try{await runTask(async()=>{const response=await api.applyResultEdits(request);onStatus?.(response);for(const item of response.applied){data.values[item.row]=item.values;s.base[item.row]=structuredClone(item.values);for(const key of s.changes.keys())if(key.startsWith(item.row+':'))s.changes.delete(key);}for(const item of response.inserted||[]){data.values[item.row]=item.values;s.base[item.row]=structuredClone(item.values);s.newRows.delete(item.row);for(const key of [...s.changes.keys()])if(key.startsWith(item.row+':'))s.changes.delete(key);}for(const row of response.deleted||[])shiftRows(s,row);s.invalid=response.requiresReload;showSQL(preview,response);if(response.error)notify(`${response.applied.length+(response.deleted||[]).length+(response.inserted||[]).length} filas aplicadas. ${response.error}${s.invalid?' Vuelve a consultar antes de continuar.':''}`);else notify(`${response.applied.length} filas actualizadas · ${(response.inserted||[]).length} añadidas · ${(response.deleted||[]).length} borradas.`);});}finally{unsubscribe();saving=false;render();sync();}}
+  async function save(deleteRequest=null){
+    commit();
+    const s=current(),data=result();
+    if((!deleteRequest&&!pending(s))||saving||s?.invalid||audit.open)return;
+    const request=deleteRequest||requestFor(s);
+    let preview;
+    saving=true;sync();
+    try{
+      preview=await api.previewResultEdits(request);
+      if(current()!==s||result()!==data)throw Error('La respuesta ha cambiado. Vuelve a revisar los cambios.');
+      if(!await reviewChanges(preview,request,s))return;
+      if(current()!==s||result()!==data)throw Error('La respuesta ha cambiado. Vuelve a revisar los cambios.');
+      const unsubscribe=api.onResultEditProgress(item=>{
+        if(item.token===s.token)status.textContent=`${s.target} · Aplicando ${item.completed}/${item.total} filas…`;
+      });
+      try{
+        await runTask(async()=>{
+          const response=await api.applyResultEdits(request);
+          onStatus?.(response);
+          for(const item of response.applied){
+            data.values[item.row]=item.values;s.base[item.row]=structuredClone(item.values);
+            for(const key of [...s.changes.keys()])if(key.startsWith(item.row+':'))s.changes.delete(key);
+          }
+          for(const item of response.inserted||[]){
+            data.values[item.row]=item.values;s.base[item.row]=structuredClone(item.values);s.newRows.delete(item.row);
+            for(const key of [...s.changes.keys()])if(key.startsWith(item.row+':'))s.changes.delete(key);
+          }
+          for(const row of response.deleted||[])shiftRows(s,row);
+          s.invalid=response.requiresReload;
+          if(response.error)showSQL(preview,response);
+          else notify(`${response.applied.length} filas actualizadas · ${(response.inserted||[]).length} añadidas · ${(response.deleted||[]).length} borradas.`);
+        });
+      }finally{unsubscribe();}
+    }catch(error){notify(error.message);}
+    finally{saving=false;render();sync();}
+  }
   root.addEventListener('click',event=>{if(event.target.closest('.data-cell-input,.data-fill-handle'))return;const td=event.target.closest('tbody td');if(td)select(td,event);},true);
   root.addEventListener('contextmenu',event=>{if(event.target.closest('input,textarea,.data-fill-handle'))return;const td=event.target.closest('tbody td');if(td&&!td.parentElement.classList.contains('cell-row-selected'))select(td,event);},true);
   root.addEventListener('dblclick',event=>{const s=current();if(saving||opening)return;const handle=event.target.closest('.data-fill-handle');const td=event.target.closest('tbody td');if(handle&&active&&s?.enabled){event.preventDefault();event.stopImmediatePropagation();fill(getVisibleRows(),active.column,result().values[active.row][active.column]);return;}if(td&&!event.target.closest('.data-cell-input')&&result()?.editContext){event.preventDefault();event.stopImmediatePropagation();if(s?.enabled&&editable(s,Number(td.parentElement.dataset.rowIndex),td.cellIndex))start(td);else if(!s?.enabled)void openCell(td);else notify('Esta columna es de solo lectura.');}},true);
@@ -51,6 +132,17 @@ export function createResultEditor({root,api,notify,runTask,onStatus,getOutput,g
   window.addEventListener('pointerup',()=>endDrag());window.addEventListener('pointercancel',()=>endDrag(true));
   document.addEventListener('lqtac:sync-copy',sync);
   return {
+    async prepareEdit(td){
+      const output=getOutput(),index=getIndex(),row=Number(td?.parentElement?.dataset.rowIndex),column=td?.cellIndex;
+      if(!result()?.editContext)throw Error('Este resultado es de solo lectura. Consulta una tabla con clave primaria para editarla.');
+      if(!await ensureEditing()||getOutput()!==output||getIndex()!==index)throw Error('No se pudo activar la edición de esta respuesta.');
+      const state=current();
+      if(!editable(state,row,column))throw Error('Este campo es de solo lectura.');
+      return value=>{
+        if(getOutput()!==output||getIndex()!==index||current()!==state||state.invalid||saving)throw Error('La respuesta ha cambiado. Abre de nuevo el contenido de la celda.');
+        stage(row,column,value);render();
+      };
+    },
     hasChanges, snapshot, restore, detach, pasteRows:async rows=>{for(const values of rows)await addRow(values);},
     viewResult(){const s=current();return s?{...result(),values:s.base}:result();},
     confirmDiscard(){if(!hasChanges())return true;if(!confirm('Hay cambios de datos pendientes. ¿Descartarlos para continuar?'))return false;for(const [index,s]of states){const data=getOutput()?.results[index];if(data)data.values=s.base.filter((_,i)=>!s.newRows.has(i)).map(row=>structuredClone(row));s.changes.clear();s.newRows.clear();s.deleted.clear();}return true;},

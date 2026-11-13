@@ -36,7 +36,8 @@ function decorateResult(result,{sql,engine,database,adapter,scopeKnown=true}){
   }
   result.editContext={...target,engine,...(result.originOid?{oid:result.originOid}:{})};return result;
 }
-async function describe(adapter,engine,target){
+async function describe(adapter,engine,target,signal){
+  signal?.throwIfAborted();
   const {schema,table}=target;let columns=[];
   if(engine==='sqlite'){
     const type=adapter.database.exec(`SELECT type FROM ${quote(schema,engine)}.sqlite_master WHERE name='${table.replaceAll("'","''")}'`)[0]?.values[0]?.[0];if(type!=='table')throw new Error('Solo se editan tablas, no vistas.');
@@ -44,8 +45,8 @@ async function describe(adapter,engine,target){
     if(columns.filter(c=>c.primary).length===1){const pk=columns.find(c=>c.primary);if(/^integer$/i.test(pk.type))pk.auto=true;}
   }else if(['mysql','mariadb'].includes(engine)){
     const qualified=quote(schema,engine)+'.'+quote(table,engine);
-    const [,definitionFields]=await adapter.connection.promise().query('SHOW CREATE TABLE '+qualified);if(!definitionFields?.some(f=>f.name==='Create Table'))throw new Error('Solo se editan tablas, no vistas.');
-    const records=async sql=>{const [rows,fields]=await adapter.connection.promise().query(sql);return rows.map(row=>Object.fromEntries(fields.map((field,i)=>[field.name,row[i]])));};
+    const [,definitionFields]=await adapter.connection.promise().query('SHOW CREATE TABLE '+qualified);signal?.throwIfAborted();if(!definitionFields?.some(f=>f.name==='Create Table'))throw new Error('Solo se editan tablas, no vistas.');
+    const records=async sql=>{signal?.throwIfAborted();const [rows,fields]=await adapter.connection.promise().query(sql);signal?.throwIfAborted();return rows.map(row=>Object.fromEntries(fields.map((field,i)=>[field.name,row[i]])));};
     const indexes=await records('SHOW INDEX FROM '+qualified),keys=new Set(indexes.filter(row=>row.Key_name==='PRIMARY').map(row=>row.Column_name));
     const rows=await records('SHOW FULL COLUMNS FROM '+qualified);
     columns=rows.map(row=>({name:row.Field,type:row.Type,primary:keys.has(row.Field),nullable:row.Null==='YES',generated:/(?:VIRTUAL|STORED) GENERATED/i.test(row.Extra||''),auto:/auto_increment/i.test(row.Extra||''),defaultValue:row.Default}));
@@ -54,6 +55,7 @@ async function describe(adapter,engine,target){
     if(target.oid&&rows[0]?.[0]!==String(target.oid))throw new Error('El origen del resultado ya no corresponde a esta tabla.');
     columns=rows.map(([,name,type,primary,nullable,generated,identity,defaultValue])=>({name,type,primary,nullable,generated:!!generated,auto:!!identity||/^nextval\(/i.test(defaultValue||''),defaultValue:defaultValue??null}));
   }else throw new Error('La edición de datos de este motor no está disponible.');
+  signal?.throwIfAborted();
   if(!columns.length||!columns.some(c=>c.primary))throw new Error('La tabla necesita una clave primaria para identificar cada registro.');
   return {columns,fingerprint:createHash('sha256').update(JSON.stringify(columns)).digest('hex')};
 }
@@ -76,9 +78,9 @@ function normalize(value,column,engine){
 }
 class ResultEdits {
   constructor(){this.sessions=new Map();}
-  async open(snapshot,index,adapter,engine,key){
+  async open(snapshot,index,adapter,engine,key,signal){
     const result=snapshot?.results?.[index];if(!result?.editContext)throw new Error('Abre los datos de una única tabla con SELECT * para editarlos.');
-    const target=result.editContext;const metadata=await describe(adapter,engine,target);
+    const target=result.editContext;const metadata=await describe(adapter,engine,target,signal);
     const columns=result.columns.map(name=>metadata.columns.find(column=>column.name===name));
     if(columns.some(c=>!c)||new Set(result.columns).size!==result.columns.length||metadata.columns.some(c=>c.primary&&!result.columns.includes(c.name)))throw new Error('El resultado debe incluir los campos y la clave primaria de una única tabla.');
     const unsupported=c=>/blob|binary|bytea|json|xml|interval|geometry|geography|point|polygon|array|\[\]/i.test(c.type);
@@ -89,12 +91,12 @@ class ResultEdits {
     this.sessions.set(token,{snapshot,index,adapter,engine,key,target,columns,primary,metadata:metadata.fingerprint,rows:structuredClone(result.values),expires:Date.now()+1800000});
     return {token,target:`${target.schema}.${target.table}`,columns:columns.map(c=>({name:c.name,type:c.type,editable:c.editable,insertable:c.insertable,nullable:c.nullable,primary:c.primary,auto:!!c.auto,hasDefault:c.defaultValue!=null}))};
   }
-  async apply(request,snapshot,adapter,key,execute,onProgress=()=>{}){
+  async apply(request,snapshot,adapter,key,execute,onProgress=()=>{},readMetadata=read=>read()){
     const item=this.sessions.get(request?.token);
     if(!item||item.snapshot!==snapshot||item.adapter!==adapter||item.key!==key||item.expires<Date.now())throw new Error('El resultado ha caducado o cambió su conexión. Vuelve a consultar la tabla.');
     const changesInput=request.changes||[],deletes=request.deletes||[],inserts=request.inserts||[];
     if(!Array.isArray(changesInput)||!Array.isArray(deletes)||!Array.isArray(inserts)||changesInput.length+deletes.length+inserts.length<1||changesInput.length+deletes.length+inserts.length>10000||Buffer.byteLength(JSON.stringify({changesInput,deletes,inserts}))>8000000)throw new Error('La edición supera el límite permitido.');
-    if((await describe(adapter,item.engine,item.target)).fingerprint!==item.metadata)throw new Error('Cambió la estructura de la tabla. Vuelve a consultarla.');
+    if((await readMetadata(signal=>describe(adapter,item.engine,item.target,signal))).fingerprint!==item.metadata)throw new Error('Cambió la estructura de la tabla. Vuelve a consultarla.');
     const groups=new Map();const cells=new Set();
     for(const change of changesInput){const {row,column,value}=change||{};if(!Number.isInteger(row)||!item.rows[row]||!Number.isInteger(column)||!item.columns[column]?.editable)throw new Error('Celda no editable.');const id=`${row}:${column}`;if(cells.has(id))throw new Error('Hay cambios duplicados.');cells.add(id);if(!groups.has(row))groups.set(row,[]);groups.get(row).push({column,value:normalize(value,item.columns[column],item.engine)});}
     if(new Set(deletes).size!==deletes.length||deletes.some(row=>!Number.isInteger(row)||!item.rows[row]||groups.has(row)))throw new Error('Las filas a borrar no son válidas.');
