@@ -49,6 +49,17 @@ async function describe(adapter,engine,target,signal){
     const records=async sql=>{signal?.throwIfAborted();const [rows,fields]=await adapter.connection.promise().query(sql);signal?.throwIfAborted();return rows.map(row=>Object.fromEntries(fields.map((field,i)=>[field.name,row[i]])));};
     const indexes=await records('SHOW INDEX FROM '+qualified),keys=new Set(indexes.filter(row=>row.Key_name==='PRIMARY').map(row=>row.Column_name));
     const rows=await records('SHOW FULL COLUMNS FROM '+qualified);
+    if(!keys.size){
+      const uniqueIndexes=new Map();
+      for(const index of indexes){
+        if(Number(index.Non_unique)!==0)continue;
+        if(!uniqueIndexes.has(index.Key_name))uniqueIndexes.set(index.Key_name,[]);
+        uniqueIndexes.get(index.Key_name).push(index);
+      }
+      const candidates=[...uniqueIndexes.entries()].sort(([left],[right])=>String(left).localeCompare(String(right)));
+      const candidate=candidates.find(([,parts])=>parts.every(part=>part.Column_name&&part.Sub_part==null&&rows.some(column=>column.Field===part.Column_name&&column.Null==='NO')));
+      if(candidate)for(const part of candidate[1])keys.add(part.Column_name);
+    }
     columns=rows.map(row=>({name:row.Field,type:row.Type,primary:keys.has(row.Field),nullable:row.Null==='YES',generated:/(?:VIRTUAL|STORED) GENERATED/i.test(row.Extra||''),auto:/auto_increment/i.test(row.Extra||''),defaultValue:row.Default}));
   }else if(engine==='postgresql'){
     const {rows}=await adapter.client.query({text:`SELECT c.oid::text,a.attname,format_type(a.atttypid,a.atttypmod),EXISTS(SELECT 1 FROM pg_index i WHERE i.indrelid=c.oid AND i.indisprimary AND a.attnum=ANY(i.indkey)),NOT a.attnotnull,COALESCE(to_jsonb(a)->>'attgenerated',''),COALESCE(to_jsonb(a)->>'attidentity',''),pg_get_expr(d.adbin,d.adrelid) FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum WHERE n.nspname=$1 AND c.relname=$2 AND c.relkind IN ('r','p') AND (c.relkind='p' OR NOT EXISTS(SELECT 1 FROM pg_inherits inh WHERE inh.inhparent=c.oid)) AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attnum`,values:[schema,table],rowMode:'array'});
@@ -56,13 +67,16 @@ async function describe(adapter,engine,target,signal){
     columns=rows.map(([,name,type,primary,nullable,generated,identity,defaultValue])=>({name,type,primary,nullable,generated:!!generated,auto:!!identity||/^nextval\(/i.test(defaultValue||''),defaultValue:defaultValue??null}));
   }else throw new Error('La edición de datos de este motor no está disponible.');
   signal?.throwIfAborted();
-  if(!columns.length||!columns.some(c=>c.primary))throw new Error('La tabla necesita una clave primaria para identificar cada registro.');
+  if(!columns.length||!columns.some(c=>c.primary))throw new Error('La tabla necesita una clave primaria o un índice UNIQUE completo con columnas NOT NULL para identificar cada registro.');
   return {columns,fingerprint:createHash('sha256').update(JSON.stringify(columns)).digest('hex')};
 }
 function normalize(value,column,engine){
   if(value===null){if(!column.nullable)throw new Error(`${column.name} no admite NULL.`);return null;}
   if(typeof value!=='string'||value.length>1000000)throw new Error('El valor de la celda no es válido.');
+  if(column.nullable&&(value===''||value.trim().toUpperCase()==='NULL'))return null;
   const type=column.type.toLowerCase();
+  const numeric=/^(?:tinyint|smallint|mediumint|int|integer|bigint|smallserial|serial|bigserial|decimal|numeric|real|float|double)\b/.test(type);
+  if(numeric&&column.nullable&&value.trim()==='')return null;
   if(/^(?:tinyint|smallint|mediumint|int|integer|bigint|smallserial|serial|bigserial)\b/.test(type)){
     if(!/^[+-]?\d+$/.test(value.trim()))throw new Error(`${column.name} requiere un entero.`);
     const number=BigInt(value.trim());const bits=/tinyint/.test(type)?8:/smallint|smallserial/.test(type)?16:/mediumint/.test(type)?24:/bigint|bigserial/.test(type)?64:32;const unsigned=/unsigned/.test(type);const min=unsigned?0n:-(1n<<BigInt(bits-1)),max=(1n<<BigInt(unsigned?bits:bits-1))-1n;

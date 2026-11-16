@@ -64,6 +64,20 @@ export function renderSQLCode(element, source, options) {
   // Large scripts remain readable without producing hundreds of thousands of nodes.
   const tokens = source.length > 250000 ? [{ type: 'plain', text: source }] : tokenizeSQL(source, options);
   for (const token of tokens) {
+    if(options?.showWhitespace){
+      const span=document.createElement('span');
+      span.className=`sql-token-${token.type}`;
+      for(const part of token.text.split(/([ \t\r\n\p{Cf}\p{Zs}\p{Zl}\p{Zp}\x00-\x08\x0b\x0c\x0e-\x1f\x7f])/u)){
+        if(!part)continue;
+        if(!/^[ \t\r\n\p{Cf}\p{Zs}\p{Zl}\p{Zp}\x00-\x08\x0b\x0c\x0e-\x1f\x7f]$/u.test(part)){span.append(document.createTextNode(part));continue;}
+        const marker=document.createElement('span');
+        marker.className='sql-whitespace'+(!' \t\r\n'.includes(part)?' sql-hidden-character':'');
+        marker.dataset.marker=part===' '?'·':part==='\t'?'→':part==='\n'?'↵':part==='\r'?'␍':'◇';
+        marker.textContent=part;
+        span.append(marker);
+      }
+      fragment.append(span);continue;
+    }
     if (token.type === 'plain') fragment.append(document.createTextNode(token.text));
     else { const span = document.createElement('span'); span.className = `sql-token-${token.type}`; span.textContent = token.text; fragment.append(span); }
   }
@@ -79,6 +93,13 @@ export function attachSQLHighlight(editor, options = {}) {
   const layer = document.createElement('pre'); layer.className = 'sql-highlight-layer'; layer.setAttribute('aria-hidden', 'true');
   surface.insertBefore(layer, editor);
   let dialect = options.dialect || 'mysql';
+  let showWhitespace=false;
+  try{showWhitespace=localStorage.getItem('dbfox.showWhitespace')==='true';}catch{}
+  const whitespaceButton=document.createElement('button');
+  whitespaceButton.id='toggle-whitespace';whitespaceButton.type='button';whitespaceButton.className='mini-tool';whitespaceButton.textContent='¶';
+  whitespaceButton.setAttribute('aria-label','Mostrar caracteres especiales e invisibles');
+  if(editor.id==='query')document.querySelector('.editor-caption .mini-tools')?.append(whitespaceButton);
+  whitespaceButton.onclick=()=>{showWhitespace=!showWhitespace;try{localStorage.setItem('dbfox.showWhitespace',String(showWhitespace));}catch{}refresh();};
   function sync() {
     const style = getComputedStyle(editor);
     for (const property of ['font', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'lineHeight', 'letterSpacing', 'tabSize', 'textIndent', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft']) layer.style[property] = style[property];
@@ -88,7 +109,10 @@ export function attachSQLHighlight(editor, options = {}) {
     layer.scrollTop = editor.scrollTop; layer.scrollLeft = editor.scrollLeft;
   }
   function refresh() {
-    renderSQLCode(layer, editor.value, { dialect });
+    renderSQLCode(layer, editor.value, { dialect, showWhitespace });
+    whitespaceButton.setAttribute('aria-pressed',String(showWhitespace));
+    const hidden=[...new Set([...editor.value].filter(character=>/[\p{Cf}\p{Zs}\p{Zl}\p{Zp}\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/u.test(character)&&character!==' ').map(character=>'U+'+character.codePointAt(0).toString(16).toUpperCase().padStart(4,'0')))];
+    whitespaceButton.dataset.hint='Caracteres especiales · Espacio ·, tabulador →, salto ↵, invisible ◇'+(hidden.length?' · Detectados: '+hidden.join(', '):'');
     // Keep the final empty line aligned with the native textarea's scroll extent.
     layer.append(document.createTextNode('\u200b'));
     editor.classList.add('sql-source-input'); sync();editor.dispatchEvent(new Event('sql-highlight:refresh'));

@@ -22,6 +22,13 @@ app.whenReady().then(async () => {
     const rendered = await js(`(()=>{const editor=document.querySelector('#query');const layer=document.querySelector('.query-editor .sql-highlight-layer');return {text:layer.textContent,value:editor.value,selection:[editor.selectionStart,editor.selectionEnd],keywords:layer.querySelectorAll('.sql-token-keyword').length,strings:layer.querySelectorAll('.sql-token-string').length,numbers:layer.querySelectorAll('.sql-token-number').length,comments:layer.querySelectorAll('.sql-token-comment').length,colors:['.sql-token-keyword','.sql-token-string','.sql-token-number','.sql-token-comment'].map(selector=>getComputedStyle(layer.querySelector(selector)).color),images:layer.querySelectorAll('img').length,fontMatch:getComputedStyle(editor).font===getComputedStyle(layer).font,widthMatch:editor.clientWidth===layer.clientWidth,caret:getComputedStyle(editor).caretColor,ariaHidden:layer.getAttribute('aria-hidden')}})()`);
     assert.equal(rendered.text, source+'\u200b'); assert.equal(rendered.value, source); assert.deepEqual(rendered.selection,[10,20]);
     assert.ok(rendered.keywords>=5 && rendered.strings && rendered.numbers && rendered.comments);
+    const whitespaceSource='SELECT\t* FROM\u00a0table\u200b;\n';
+    await js(`(()=>{const editor=document.querySelector('#query');editor.value=${JSON.stringify(whitespaceSource)};editor.dispatchEvent(new Event('input'));document.querySelector('#toggle-whitespace').click()})()`);
+    assert.equal(await js(`document.querySelector('#query').value`),whitespaceSource);
+    assert.equal(await js(`document.querySelector('.query-editor .sql-highlight-layer').textContent`),whitespaceSource+'\u200b');
+    assert.equal(await js(`document.querySelectorAll('#toggle-whitespace').length`),1);
+    assert.equal(await js(`document.querySelectorAll('.query-editor .sql-hidden-character').length`),2);
+    await js(`(()=>{document.querySelector('#toggle-whitespace').click();const editor=document.querySelector('#query');editor.value=${JSON.stringify(source)};editor.dispatchEvent(new Event('input'));editor.setSelectionRange(10,20)})()`);
     assert.equal(new Set(rendered.colors).size,4); assert.equal(rendered.images,0);
     assert.equal(rendered.fontMatch,true); assert.equal(rendered.widthMatch,true); assert.equal(rendered.ariaHidden,'true'); assert.notEqual(rendered.caret,'rgba(0, 0, 0, 0)');
     await js(`(()=>{const editor=document.querySelector('#query');editor.value=Array.from({length:50},(_,i)=>'SELECT '+i+", '"+'largo_'.repeat(90)+"';").join('\\n');editor.dispatchEvent(new Event('input'));editor.scrollTop=100;editor.scrollLeft=220;editor.dispatchEvent(new Event('scroll'))})()`);
@@ -41,7 +48,13 @@ app.whenReady().then(async () => {
     window.setSize(1000,680); await settled();
     assert.equal(await js(`document.querySelector('#query').clientWidth===document.querySelector('.query-editor .sql-highlight-layer').clientWidth`),true);
     assert.equal(await js('document.body.scrollWidth<=innerWidth'),true);
-    console.log('PASS: SQL token colors, exact source/caret/selection, escaped HTML, scroll alignment, tabs, IME, triggers and resize');
+    await js(`(()=>{const editor=document.querySelector('#query');editor.value='a.b A.B axb';editor.setSelectionRange(0,0);editor.dispatchEvent(new Event('input'));document.querySelector('#open-sql-find').click();document.querySelector('#sql-find-text').value='a.b';document.querySelector('#sql-find-text').dispatchEvent(new Event('input'))})()`);
+    assert.match(await js(`document.querySelector('#sql-find-count').textContent`),/de 2/);
+    await js(`document.querySelector('.sql-find-bar [data-action="next"]').click()`);
+    assert.deepEqual(await js(`(()=>{const e=document.querySelector('#query');return [e.selectionStart,e.selectionEnd]})()`),[0,3]);
+    await js(`document.querySelector('#sql-replace-text').value='$x';document.querySelector('.sql-find-bar [data-action="all"]').click()`);
+    assert.equal(await js(`document.querySelector('#query').value`),'$x $x axb');
+    console.log('PASS: SQL syntax, source preservation, literal search and replace all');
     clearTimeout(timeout); app.exit(0);
   } catch(error) { console.error(error); clearTimeout(timeout); app.exit(1); }
 });

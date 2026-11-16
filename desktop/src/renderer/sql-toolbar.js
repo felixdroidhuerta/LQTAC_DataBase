@@ -28,7 +28,7 @@ export function initSQLToolbar({ api, notify }) {
   groupTools(document.querySelector('.editor-caption .mini-tools'), [
     ['Archivos SQL', ['#open-sql-file', '#save-sql-file', '#save-sql-as']],
     ['Favoritos', ['#save-sql-favorite','#open-sql-favorites']],
-    ['Formato y vista', ['#format-query','#toggle-line-numbers']],
+    ['Formato y vista', ['#format-query','#toggle-line-numbers','#toggle-whitespace','#open-sql-find']],
     ['Ejecución', ['#run-selection', '#run-all', '#stop-query']],
     ['Estructura y relaciones', ['#show-relations']]
   ]);

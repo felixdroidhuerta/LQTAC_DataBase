@@ -4,6 +4,7 @@ import { attachAutocomplete } from './autocomplete.js';
 import { initPanelLayout } from './layout.js';
 import { createTableDesigner } from './table-designer.js';
 import { attachSQLHighlight } from './sql-highlight.js';
+import {initSQLFind} from './sql-find.js';
 import { initialQuery } from './dialect.js';
 import { initOutputs } from './outputs.js';
 import { initQueryTools } from './query-tools.js';
@@ -48,6 +49,7 @@ const navigator = createConnectionNavigator({ api, runTask: action => task(actio
 });
 const autocomplete = attachAutocomplete($('#query'), $('#table-completions'), () => connection,(tables,key)=>api.columns(tables,key));
 const sqlHighlight = attachSQLHighlight($('#query'));
+initSQLFind($('#query'));
 const outputs = initOutputs({api,notify});
 const resultsGrid=initResultsGrid({api,notify,runTask:action=>task(action),onStatus:status=>updateConnection(status)});
 const queryTools = initQueryTools({api,getConnection:()=>connection,runSelection:()=>run(true),runTask:action=>task(action),notify,isBusy:()=>busy,getExportRows:()=>resultsGrid.exportRows(),hasPendingEdits:()=>resultsGrid.hasChanges()});

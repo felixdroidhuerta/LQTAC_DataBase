@@ -20,5 +20,16 @@ app.whenReady().then(async()=>{const window=BrowserWindow.getAllWindows()[0];win
   await js(`document.querySelector('#result-filter-value').value='';document.querySelector('#result-filter-value').dispatchEvent(new Event('input'))`);await until('document.querySelectorAll("#results tbody tr").length===3');assert.deepEqual(await ids(),['1','2','10']);assert.equal(await js('document.querySelectorAll("#outputs-body tbody tr").length'),1);
   await run("SELECT 1 AS primero; SELECT 'z' AS segundo;",true);await js(`document.querySelector('#export-result-index').value='1';document.querySelector('#export-result-index').dispatchEvent(new Event('change'))`);assert.deepEqual(await ids(),['z']);assert.equal(await js('document.querySelector("#results th").textContent'),'segundo');assert.equal(await js('document.querySelectorAll("#result-filter-field option").length'),2);
   await js('document.querySelector("#toggle-theme").click()');assert.notEqual(await js('getComputedStyle(document.querySelector("#result-filter-value")).backgroundColor'),'rgb(255, 255, 255)');
+  await run('WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM numbers WHERE n<250) SELECT n FROM numbers;');
+  assert.equal(await js('document.querySelectorAll("#results tbody tr").length'),100);
+  assert.match(await js('document.querySelector("#result-search-scope").textContent'),/250 filas cargadas/);
+  await js(`document.querySelector('[aria-label="Página siguiente"]').click()`);
+  assert.equal((await ids())[0],'101');
+  await js(`document.querySelector('[aria-label="Última página"]').click()`);
+  assert.equal(await js('document.querySelectorAll("#results tbody tr").length'),50);
+  await js(`document.querySelector('#result-filter-value').value='7';document.querySelector('#result-filter-value').dispatchEvent(new Event('input'))`);
+  await until(`document.querySelector('#results tbody td')?.textContent==='7'`);
+  assert.match(await js('document.querySelector("#result-page-info").textContent'),/Página 1 de 1/);
+  assert.ok((await ids()).includes('247'));
   console.log('PASS: numeric sort cycles, local field filter, accent/case search, no matches/reset, filtered/sorted CSV and XLSX, multi-result selection and dark inputs');clearTimeout(timeout);app.exit(0);
 }catch(error){console.error(error);clearTimeout(timeout);app.exit(1);}});

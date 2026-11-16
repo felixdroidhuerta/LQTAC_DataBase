@@ -24,6 +24,8 @@ app.whenReady().then(async () => {
     await js(`document.querySelector('.edit-table[data-schema=test][data-table=proyectos]').click()`);
     await until("document.querySelector('#designer-title').textContent==='test.proyectos' && !document.querySelector('#preview-table').disabled");
     assert.equal(await js('document.querySelectorAll(".structure-table tbody tr").length'), 2);
+    const copiedName=await js(`document.querySelector('.structure-table tr[data-column="1"] [data-field="name"]').value`);
+    await js(`document.querySelector('.structure-table tr[data-column="1"]').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:400,clientY:400}));document.querySelector('#structure-column-menu button').click()`);
     assert.equal(await js('document.querySelector("[data-column=\\"0\\"] [data-field=primary]").checked'), true);
     await js(`document.querySelector('.structure-actions button').click();
       const row=document.querySelector('.structure-table tbody tr:last-child');
@@ -68,6 +70,9 @@ app.whenReady().then(async () => {
     await js(`document.querySelector('#cancel-table-review').click();window.confirm=()=>true;document.querySelector('#close-designer').click()`);
     await js(`document.querySelector('[aria-label="Crear tabla en test"]').click()`);
     await until("document.querySelector('#designer-title').textContent==='test.nueva_tabla' && !document.querySelector('#preview-table').disabled");
+    await js(`document.querySelector('[data-designer-pane="columns"]').click()`);
+    await js(`document.querySelector('#designer-content').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:400,clientY:400}));document.querySelector('#structure-column-menu button:last-child').click()`);
+    assert.equal(await js(`document.querySelector('.structure-table tbody tr:last-child [data-field="name"]').value`),copiedName);
     await js(`document.querySelector('#preview-table').click()`);
     await until("document.querySelector('#table-review-dialog').open && !document.querySelector('#apply-table').disabled");
     assert.match(await js('document.querySelector("#table-review-sql").textContent'), /CREATE TABLE `test`\.`nueva_tabla`/);

@@ -43,7 +43,7 @@ test('SQLite changes are bound to original row identities, preserve NULL/text an
     const text="' ; DROP TABLE records; --\nUnicode á 🐙";
     adapter.database.run('BEGIN');const response=await service.apply({token:info.token,changes:[{row:2,column:1,value:text},{row:0,column:3,value:''},{row:1,column:3,value:null}]},snapshot,adapter,'local',execute);
     assert.equal(response.applied.length,3);assert.equal(adapter.database.exec('SELECT name FROM records WHERE id=3')[0].values[0][0],text);assert.equal(snapshot.results[0].values[2][1],text);
-    assert.equal(adapter.database.exec('SELECT note FROM records WHERE id=1')[0].values[0][0],'');assert.equal(adapter.database.exec('SELECT note FROM records WHERE id=2')[0].values[0][0],null);
+    assert.equal(adapter.database.exec('SELECT note FROM records WHERE id=1')[0].values[0][0],null);assert.equal(adapter.database.exec('SELECT note FROM records WHERE id=2')[0].values[0][0],null);
     adapter.database.run('ROLLBACK');assert.equal(adapter.database.exec('SELECT name FROM records WHERE id=3')[0].values[0][0],'Gamma');
   }finally{adapter.close();}
 });

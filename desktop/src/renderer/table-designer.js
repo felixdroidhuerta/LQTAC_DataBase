@@ -22,6 +22,46 @@ const emptyColumn = name => ({ originalName: '', name, type: 'VARCHAR(255)', nul
 
 export function createTableDesigner({ api, show, runTask, onStatus, onQuery, notify }) {
   let original = null, draft = null, dirty = false, pane = 'columns', review = null, pending = false, session = null, metadataUnknown = false;
+  let copiedColumn=null,selectedColumn=-1;
+  const columnMenu=el('div',undefined,'connection-context');columnMenu.id='structure-column-menu';columnMenu.hidden=true;columnMenu.setAttribute('role','menu');
+  const copyField=button('Copiar campo',()=>{
+    const column=draft?.columns[selectedColumn];if(!column)return;
+    if(column.unsupported){notify('Este campo contiene atributos avanzados. Copia su definición desde DDL para conservarlos.');columnMenu.hidden=true;return;}
+    const definition=emptyColumn(column.name);
+    for(const key of Object.keys(definition))if(key!=='originalName'&&column[key]!==undefined)definition[key]=copy(column[key]);
+    copiedColumn={definition,primary:draft.indexes.some(item=>item.kind==='PRIMARY'&&item.columns.some(part=>part.name===column.name)),unique:draft.indexes.some(item=>item.kind==='UNIQUE'&&item.columns.length===1&&item.columns[0].name===column.name)};
+    columnMenu.hidden=true;notify(`Campo ${column.name} copiado. Abre la estructura de destino y usa Pegar campo.`);
+  });
+  const pasteField=button('Pegar campo',()=>{
+    columnMenu.hidden=true;if(!copiedColumn||!draft||pending)return;
+    const column=copy(copiedColumn.definition);
+    if(column.autoIncrement&&draft.columns.some(item=>item.autoIncrement)){notify('La tabla destino ya tiene un campo autoincremental. Revisa su estructura antes de pegar otro.');return;}
+    const base=column.name.slice(0,55);let suffix=1;
+    while(draft.columns.some(item=>item.name.toLowerCase()===column.name.toLowerCase()))column.name=`${base}_${suffix++}`;
+    column.originalName='';draft.columns.push(column);
+    if(copiedColumn.primary)columnFlag(column,'PRIMARY',true);
+    if(copiedColumn.unique)columnFlag(column,'UNIQUE',true);
+    changed();renderPane();
+    $('#designer-content').querySelector('.structure-table tbody tr:last-child input')?.focus();
+    notify(`Campo ${column.name} añadido al borrador. Revisa los cambios SQL antes de aplicarlos.`);
+  });
+  copyField.setAttribute('role','menuitem');pasteField.setAttribute('role','menuitem');
+  columnMenu.append(copyField,pasteField);document.body.append(columnMenu);
+  $('#designer-content').addEventListener('contextmenu',event=>{
+    if(pane!=='columns'||!draft||pending)return;
+    event.preventDefault();
+    const row=event.target.closest('tr[data-column]');selectedColumn=row?Number(row.dataset.column):-1;
+    $('#designer-content').querySelectorAll('.structure-column-selected').forEach(item=>item.classList.remove('structure-column-selected'));
+    row?.classList.add('structure-column-selected');
+    copyField.disabled=selectedColumn<0;pasteField.disabled=!copiedColumn;
+    columnMenu.hidden=false;
+    columnMenu.style.left=Math.max(8,Math.min(event.clientX,innerWidth-columnMenu.offsetWidth-8))+'px';
+    columnMenu.style.top=Math.max(8,Math.min(event.clientY,innerHeight-columnMenu.offsetHeight-8))+'px';
+    columnMenu.querySelector('button:not(:disabled)')?.focus();
+  });
+  document.addEventListener('pointerdown',event=>{if(!columnMenu.contains(event.target))columnMenu.hidden=true;});
+  columnMenu.onkeydown=event=>{if(event.key==='Escape')columnMenu.hidden=true;};
+  window.addEventListener('resize',()=>columnMenu.hidden=true);
   const triggers = createTriggerEditor({ api, runTask, notify, onChange: snapshot => { if (snapshot) load(snapshot); pane = 'triggers'; renderPane(); } });
   function controls() {
     $('#designer-properties').inert = pending;
