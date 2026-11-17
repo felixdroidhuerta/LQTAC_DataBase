@@ -201,10 +201,10 @@ app.whenReady().then(() => {
   }));
   register('settings:get', () => settings.get());
   register('settings:fonts', () => listSystemFonts());
-  register('app:info', () => ({ version: app.getVersion(), manualVersion: '0.2.5' }));
+  register('app:info', () => ({ version: app.getVersion(), manualVersion: '0.2.6' }));
   register('app:manual', async () => {
     const portable = require('node:fs').existsSync(path.join(path.dirname(process.execPath), 'portable.json'));
-    const file = portable ? path.join(path.dirname(process.execPath), 'Manual-de-usuario-0.2.5.pdf') : path.resolve(__dirname, '../../output/pdf/LQTAC_dbFox_Manual_de_usuario_0.2.5.pdf');
+    const file = portable ? path.join(path.dirname(process.execPath), 'Manual-de-usuario-0.2.6.pdf') : path.resolve(__dirname, '../../output/pdf/LQTAC_dbFox_Manual_de_usuario_0.2.6.pdf');
     try { await fs.access(file); } catch { throw Error('No se encuentra el manual de usuario en esta instalación.'); }
     const error = await shell.openPath(file);
     if (error) throw Error('No se pudo abrir el manual: ' + error);

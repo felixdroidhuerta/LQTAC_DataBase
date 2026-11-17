@@ -45,6 +45,8 @@ for page in PAGES:
     if page['title'] == 'Arrastrar y autorrellenar una columna':
         page['image'], page['crop'] = '05b-editar.png', 'fill-handle'
 
+from release_content import update_pages
+PAGES = update_pages(PAGES)
 ROOT=Path(__file__).resolve().parents[2]
 ASSETS=Path(__file__).parent/'assets'
 VERSION=sys.argv[2] if len(sys.argv)>2 else json.loads((ROOT/'desktop/package.json').read_text(encoding='utf-8'))['version']
@@ -113,7 +115,7 @@ para('Manual de usuario',LEFT,609,WIDTH,ParagraphStyle('cover',parent=TITLE,font
 para('Conectar, consultar y trabajar con tus datos.',LEFT,548,WIDTH,LEAD)
 y=image('03-consultas.png',505,max_h=335)
 para('Conexiones · SQL · Resultados · Dashboards',LEFT,y-13,WIDTH,HEAD)
-para('Actualizado · 31 de octubre de 2026\nCapturas reales con datos ficticios y SQLite local.\nEdición '+VERSION+'.',LEFT,108,WIDTH,CAP)
+para('Actualizado · 17 de noviembre de 2026\nCapturas reales con datos ficticios y SQLite local.\nEdición '+VERSION+'.',LEFT,108,WIDTH,CAP)
 footer(1);c.showPage()
 
 # Two-column, linked contents.
@@ -126,10 +128,10 @@ for i,p in enumerate(PAGES):
     col=0 if i<split else 1;x=LEFT+col*270;y=ys[col]
     label=p['title'];page=i+3
     c.setFillColor(BLUE);c.setFont('SegoeB',10);c.drawString(x,y-1,f'{page:02d}')
-    st=ParagraphStyle('toc',parent=BODY,fontSize=10,leading=13)
+    st=ParagraphStyle('toc',parent=BODY,fontSize=9.5,leading=12)
     bottom=para(label,x+28,y+2,colw-30,st)
     c.linkRect(label,f'page{page}',(x,bottom-5,x+colw,y+8),relative=0,thickness=0)
-    ys[col]=y-34
+    ys[col]=y-28
 para('Cómo leer las imágenes',LEFT,103,WIDTH,HEAD)
 para('Las capturas utilizan datos ficticios del laboratorio local. Los servidores y sus contenidos no se han consultado. Las funciones disponibles dependen del motor y de los permisos del usuario.',LEFT,83,WIDTH,CAP)
 footer(2);c.showPage()
@@ -162,7 +164,7 @@ for i,p in enumerate(PAGES):
     if y<BOTTOM:raise RuntimeError(f'Page {number} overflow: bottom {y:.1f} / {p["title"]}')
     footer(number);c.showPage()
 c.save()
-md=['# LQTAC dbFox '+VERSION+' - Manual de usuario','','Actualizado: 31 de octubre de 2026.','Capturas reales con datos ficticios y SQLite local.']
+md=['# LQTAC dbFox '+VERSION+' - Manual de usuario','','Actualizado: 17 de noviembre de 2026.','Capturas reales con datos ficticios y SQLite local.']
 for p in PAGES:
     md.extend(['','## '+p['title'],'',p['lead']])
     if p.get('image'):md.extend(['','![Captura de '+p['title']+'](assets/'+p['image']+')','',p['caption']])

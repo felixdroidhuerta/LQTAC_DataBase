@@ -1,6 +1,6 @@
-# LQTAC dbFox 0.2.5 - Manual de usuario
+# LQTAC dbFox 0.2.6 - Manual de usuario
 
-Actualizado: 31 de octubre de 2026.
+Actualizado: 17 de noviembre de 2026.
 Capturas reales con datos ficticios y SQLite local.
 
 ## Abrir y empezar a trabajar
@@ -176,17 +176,17 @@ Las herramientas de Resultados trabajan sobre las filas recibidas en esa pestañ
 
 Consulta del laboratorio. Los resultados corresponden a datos ficticios.
 
-### Orden y búsqueda
+### Filtro sobre todas las filas cargadas
 
-Pulsa la cabecera de una columna para cambiar la ordenación. Selecciona un campo en el primer cuadro y escribe el texto de búsqueda en el segundo. Todos los campos busca en todas las columnas. La búsqueda no vuelve a consultar el servidor.
+Selecciona el campo y escribe el texto. El indicador muestra cuántas filas están disponibles para buscar. El filtro y la ordenación se aplican a todas las filas cargadas antes de paginar. Si la consulta llegó limitada, la búsqueda abarca únicamente los datos recibidos.
 
-### Filas y Sin límite
+### Páginas y límite de consulta
 
-El selector permite 50, 100, 500, 1000 o Sin límite. Cambia la opción y ejecuta de nuevo para obtener otro tamaño de resultado. Sin límite elimina el tope de filas de la aplicación, pero respeta el LIMIT escrito en la query, el tiempo máximo y los límites de tamaño.
+Filas por página permite elegir 100, 500 o 1.000 y navegar al principio, atrás, adelante o al final. El selector Filas de la barra superior controla la cantidad recibida del servidor. Sin límite respeta los límites que ya tenga el SQL.
 
-### Pestañas y lectura
+### Ordenación y exportación
 
-Cada salida se puede cerrar con su ×; cerrar Resultados no cierra el SQL. La barra horizontal permite consultar columnas anchas. Ajustar texto facilita leer valores largos. Si el resultado está truncado, el orden y el filtro solo abarcan las filas cargadas.
+Pulsa una cabecera para alternar ascendente, descendente y orden original. Al filtrar u ordenar vuelves a la primera página. CSV y XLSX exportan todo el conjunto filtrado y ordenado, no solo la página visible.
 
 ## Copiar contenido y exportar
 
@@ -216,17 +216,17 @@ Editar datos cambia valores de filas; es una operación distinta de cambiar la e
 
 Ciudad modificada localmente: el resaltado indica que todavía falta Aplicar cambios.
 
-### 1. Activa la edición
+### 1. Abre una tabla editable
 
-En una consulta SELECT * de una tabla con clave primaria, haz doble clic o pulsa F2 en una celda. También puedes activar Editar datos en la barra de resultados.
+Ejecuta SELECT * sobre una tabla. En MySQL y MariaDB puede tener clave PRIMARY o un índice UNIQUE completo con columnas NOT NULL. Un WHERE no impide editar. Las vistas, las consultas combinadas y las columnas protegidas pueden ser de solo lectura.
 
-### 2. Edita sin guardar todavía
+### 2. Prepara los valores
 
-Doble clic, F2 o escribir sobre una celda abre su editor. Enter deja el valor pendiente; Escape cancela esa edición y Tab pasa al siguiente campo editable. El botón NULL asigna un nulo real, distinto del texto NULL y de una cadena vacía.
+Haz doble clic o pulsa F2 en la celda. Enter deja el cambio pendiente. En una columna que admite NULL, vaciar la celda o escribir NULL produce un nulo real. En los campos numéricos también se interpreta un valor formado solo por espacios como NULL.
 
-### 3. Aplica o descarta
+### 3. Revisa y confirma
 
-Las celdas pendientes se resaltan. Aplicar cambios envía las modificaciones; Descartar restaura los valores cargados. No se editan claves, campos calculados o tipos complejos. Esta función está disponible en MySQL/MariaDB, PostgreSQL y SQLite.
+Aplicar cambios abre primero las queries. Aplicar ejecuta los cambios y Cerrar conserva las ediciones pendientes. Una comprobación de concurrencia evita sobrescribir registros modificados desde otra sesión.
 
 ## Arrastrar y autorrellenar una columna
 
@@ -586,3 +586,91 @@ Extrae el ZIP nuevo en otra carpeta. Cierra las dos versiones y copia tu carpeta
 ### Primera apertura y comprobación
 
 Abre LQTAC dbFox.exe desde la carpeta completa. Revisa tus conexiones, consultas y dashboards. Las contraseñas guardadas pueden requerir introducirse de nuevo en otro equipo o cuenta.
+
+## Conectar mediante SSH o socket local
+
+MySQL y MariaDB incorporan tres métodos de conexión.
+
+### TCP/IP y conexión local
+
+Estándar TCP/IP usa el servidor y puerto de la base. Socket local / tubería utiliza una ruta disponible en el mismo equipo. El servicio debe tener habilitado ese transporte.
+
+### TCP/IP sobre SSH
+
+Indica servidor SSH, puerto y usuario. Elige clave privada / agente o usuario y contraseña. La contraseña SSH se pide al conectar y se conserva durante la sesión. El campo de contraseña de base de datos sigue siendo independiente.
+
+### Identidad del servidor
+
+La huella es opcional en el formulario. Si se deja vacía, la primera conexión solicita confirmar la identidad y la recuerda en el equipo. Si cambia, se bloquea la conexión. Puedes introducir una huella SHA256 conocida para comprobarla directamente.
+
+### Destino dentro del túnel
+
+Servidor de base de datos se interpreta desde el servidor SSH. Usa 127.0.0.1 si MySQL está en ese mismo servidor. Las claves cifradas deben cargarse en el agente; en Windows se admite Pageant.
+
+## Buscar, reemplazar y ver caracteres invisibles
+
+La cabecera separa conexión, aclaraciones, búsqueda y acciones.
+
+### Búsqueda fija
+
+Selecciona Buscar o Buscar y reemplazar. Ctrl+F enfoca la búsqueda y Ctrl+H habilita el reemplazo. Las flechas recorren las coincidencias; Enter avanza y Mayús+Enter retrocede. Aa distingue mayúsculas y minúsculas.
+
+### Reemplazar texto literal
+
+Reemplazar actúa sobre la coincidencia seleccionada. Si no hay ninguna seleccionada, primero la localiza. Reemplazar todo modifica todas las coincidencias del documento SQL actual. Se busca texto literal y se conserva el resto del script.
+
+### Caracteres especiales
+
+El botón de párrafo muestra puntos para espacios, flechas para tabuladores y saltos, y rombos para otros caracteres ocultos. La ayuda muestra los códigos Unicode detectados, incluidos espacios no separables y caracteres de ancho cero. Es una visualización; el SQL conserva sus caracteres originales.
+
+## Cambiar de servidor y conservar respuestas
+
+Una misma pestaña SQL puede trabajar con varios servidores conectados.
+
+### Seleccionar el destino
+
+En la cabecera, el selector de servidor ofrece las sesiones conectadas. Conecta el perfil desde el explorador para que aparezca. Comprueba también la base o esquema antes de ejecutar.
+
+### Respuestas por servidor
+
+Al cambiar de servidor se conserva la respuesta anterior con sus ediciones pendientes. Al volver, se recupera su contexto. Estas respuestas y cambios pendientes se mantienen durante la sesión abierta de la aplicación.
+
+### Otra query con cambios pendientes
+
+Si vuelves a ejecutar con cambios sin aplicar, aparece otra pestaña de respuesta. La anterior conserva las ediciones. Si ambas consultan la misma tabla, la nueva lee los valores guardados en el servidor.
+
+## Contenido completo, filas y confirmaciones
+
+Revisa el SQL antes de guardar una modificación o borrar registros.
+
+### Textos extensos
+
+Botón derecho sobre una celda y Ver contenido completo abre el texto entero. Editar contenido permite modificarlo. Dejar cambio pendiente lo devuelve a la cuadrícula; después pulsa Aplicar cambios y confirma el SQL.
+
+### Copiar y pegar registros
+
+Selecciona filas con Ctrl o Mayús y usa el menú contextual para copiarlas, con o sin encabezados y separadas por tabulador, punto y coma o coma. Pegar filas prepara inserciones pendientes. Los identificadores autoincrementales reciben nuevos valores.
+
+### Borrar filas seleccionadas
+
+Quitar fila prepara el borrado de las filas seleccionadas. La ventana indica cantidad, claves y queries. Aplicar ejecuta esos borrados y Cerrar cancela. Las demás ediciones pendientes no se aplican con esta acción.
+
+### Tiempo máximo
+
+La preparación de edición y la comprobación de estructura usan el tiempo configurado. Al agotarlo se solicita cancelación y se informa del vencimiento. La sesión puede seguir ocupada hasta que el servidor confirme la cancelación.
+
+## Copiar campos entre tablas
+
+Copia la definición de una columna y añádela al borrador de otra tabla.
+
+### Copiar
+
+Abre la estructura de la tabla origen y entra en Columnas. Botón derecho en la fila y Copiar campo. La definición queda disponible durante la sesión.
+
+### Pegar
+
+Abre la tabla destino, entra en Columnas y pulsa botón derecho, Pegar campo. Se conservan los atributos editables, los valores predeterminados y los indicadores de clave primaria o única. Si el nombre existe se añade un sufijo.
+
+### Revisar la definición
+
+El pegado solo modifica el borrador. Revisa el tipo, las expresiones, los índices y el SQL antes de aplicar. Si ya existe un campo autoincremental, se impide pegar otro con ese atributo. Los campos con atributos avanzados no representables requieren copiar su DDL manualmente.
