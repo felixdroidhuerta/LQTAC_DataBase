@@ -115,7 +115,7 @@ para('Manual de usuario',LEFT,609,WIDTH,ParagraphStyle('cover',parent=TITLE,font
 para('Conectar, consultar y trabajar con tus datos.',LEFT,548,WIDTH,LEAD)
 y=image('03-consultas.png',505,max_h=335)
 para('Conexiones · SQL · Resultados · Dashboards',LEFT,y-13,WIDTH,HEAD)
-para('Actualizado · 17 de noviembre de 2026\nCapturas reales con datos ficticios y SQLite local.\nEdición '+VERSION+'.',LEFT,108,WIDTH,CAP)
+para('Actualizado · 23 de noviembre de 2026\nCapturas reales con datos ficticios y servidores de prueba locales.\nEdición '+VERSION+'.',LEFT,108,WIDTH,CAP)
 footer(1);c.showPage()
 
 # Two-column, linked contents.
@@ -164,7 +164,7 @@ for i,p in enumerate(PAGES):
     if y<BOTTOM:raise RuntimeError(f'Page {number} overflow: bottom {y:.1f} / {p["title"]}')
     footer(number);c.showPage()
 c.save()
-md=['# LQTAC dbFox '+VERSION+' - Manual de usuario','','Actualizado: 17 de noviembre de 2026.','Capturas reales con datos ficticios y SQLite local.']
+md=['# LQTAC dbFox '+VERSION+' - Manual de usuario','','Actualizado: 23 de noviembre de 2026.','Capturas reales con datos ficticios y servidores de prueba locales.']
 for p in PAGES:
     md.extend(['','## '+p['title'],'',p['lead']])
     if p.get('image'):md.extend(['','![Captura de '+p['title']+'](assets/'+p['image']+')','',p['caption']])

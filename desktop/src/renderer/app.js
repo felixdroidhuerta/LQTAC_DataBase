@@ -476,9 +476,9 @@ async function loadProfiles() {
 }
 for (const id of ['#new-connection', '#new-connection-home']) $(id).onclick = () => { show('connections'); editProfile(); };
 let connectingAll=false;
-$('#connect-all').onclick=async()=>{
+async function connectAll(){
   if(busy||connectingAll||!api)return;
-  connectingAll=true;const button=$('#connect-all');button.disabled=true;
+  connectingAll=true;const button=$('#connect-all'),sideButton=$('#connect-all-side');button.disabled=true;sideButton.disabled=true;
   let connected=0,already=0,skipped=0,failed=0;
   try{
     const profiles=await api.listConnections();
@@ -499,8 +499,10 @@ $('#connect-all').onclick=async()=>{
     await loadProfiles();
     notify(`Conectar todos: ${connected} conectadas, ${already} ya abiertas, ${skipped} omitidas y ${failed} con error.`);
   }catch(error){notify(error.message);}
-  finally{connectingAll=false;button.disabled=false;button.textContent='Conectar todos';}
-};
+  finally{connectingAll=false;button.disabled=false;sideButton.disabled=false;button.textContent='Conectar todos';}
+}
+$('#connect-all').onclick=connectAll;
+$('#connect-all-side').onclick=connectAll;
 $('#connection-backup-side').onclick = () => { show('connections'); loadProfiles(); };
 let connectionBackupMode = null;
 function openConnectionBackup(mode) {

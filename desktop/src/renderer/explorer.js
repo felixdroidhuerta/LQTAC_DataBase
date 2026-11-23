@@ -63,7 +63,7 @@ export class DatabaseExplorer {
       if (term && !schemaMatches && !objects.length) continue;
       matches++;
       const active = schema.name === data.database;
-      const database = branch(JSON.stringify(['schema', schema.name]), undefined, active, `schema-tree${active ? ' active-database' : ''}`);
+      const database = branch(JSON.stringify(['schema', schema.name]), undefined, false, `schema-tree${active ? ' active-database' : ''}`);
       database.summary.append(node('span', schema.name, 'schema-name'));
       database.summary.title = schema.name;
       if (remote && data.engine !== 'sqlserver') {
@@ -79,7 +79,7 @@ export class DatabaseExplorer {
         if (!remote && ['procedure', 'function'].includes(group.type)) continue;
         const items = objects.filter(object => object.type === group.type);
         if (term && !schemaMatches && !items.length) continue;
-        const folder = branch(JSON.stringify(['group', schema.name, group.type]), `${group.title} (${items.length})`, group.type === 'table', 'object-group');
+        const folder = branch(JSON.stringify(['group', schema.name, group.type]), `${group.title} (${items.length})`, false, 'object-group');
         database.details.append(folder.details);
         if (editable && group.type === 'table' && this.onCreate) {
           const create = node('button', '＋', 'create-table');

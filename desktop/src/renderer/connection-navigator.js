@@ -177,7 +177,9 @@ export function createConnectionNavigator({ api, runTask, notify, onConnect, onD
     const request = ++generation;
     try {
       const next = await api.connectionOverview(); if (request !== generation) return;
-      for (const state of next.sessions) if (state.connected && !status(state.sessionKey)?.connected) expanded.set(state.sessionKey, true);
+      for (const state of next.sessions) if (state.connected && !status(state.sessionKey)?.connected) {
+        expanded.set(state.sessionKey, false);trees.delete(state.sessionKey);
+      }
       overview = next;
       selected = new Set([...selected].filter(id => profile(id) || id === 'local'));
       render();

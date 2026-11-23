@@ -11,11 +11,11 @@ output.mkdir(parents=True, exist_ok=True)
 reader = PdfReader(source)
 text = '\n'.join(page.extract_text() for page in reader.pages)
 assert '0.2.5' not in text
-for term in ['SSH', 'NULL', 'Pegar campo', 'Buscar y reemplazar', 'Filas por página']:
+for term in ['SSH', 'NULL', 'Pegar campo', 'Buscar y reemplazar', 'Filas por página', 'Conectar todos', 'Exportar todo', 'Mayús+clic', 'Tab o Enter', 'contraídas']:
     assert term in text, term
 document = pdfium.PdfDocument(source)
-pages = [0, 1, 5, 10, 12, 30, 31, 32, 33, 34]
-sheet = Image.new('RGB', (1224, 5 * 820), 'white')
+pages = [0, 1, 7, 8, 22, 30, 31, 32, 33, 34, 35, 36]
+sheet = Image.new('RGB', (1224, ((len(pages)+1)//2) * 820), 'white')
 draw = ImageDraw.Draw(sheet)
 for position, index in enumerate(pages):
     image = document[index].render(scale=1).to_pil().convert('RGB')

@@ -1,7 +1,7 @@
 # LQTAC dbFox 0.2.6 - Manual de usuario
 
-Actualizado: 17 de noviembre de 2026.
-Capturas reales con datos ficticios y SQLite local.
+Actualizado: 23 de noviembre de 2026.
+Capturas reales con datos ficticios y servidores de prueba locales.
 
 ## Abrir y empezar a trabajar
 
@@ -29,7 +29,7 @@ Este ejercicio usa solo la base SQLite de ejemplo incluida en la aplicación.
 
 ### 1. Consulta los proyectos
 
-En Inicio, pulsa Probar el laboratorio. Escribe SELECT * FROM main.proyectos ORDER BY id; y pulsa Ctrl+Enter con el cursor dentro de esa sentencia. Verás los tres proyectos de ejemplo con sus campos id, nombre, estado y motor.
+En Inicio, pulsa Probar el laboratorio y abre una consulta con + o Ctrl+N. Escribe SELECT * FROM main.proyectos ORDER BY id; y pulsa Ctrl+Enter con el cursor dentro de esa sentencia. Verás los tres proyectos de ejemplo con sus campos id, nombre, estado y motor.
 
 ### 2. Busca y ordena
 
@@ -122,7 +122,7 @@ El botón derecho permite conectar, editar, duplicar, gestionar la contraseña, 
 
 ### Buscar y seleccionar una base
 
-Despliega la conexión, la base o esquema y sus carpetas: Tablas, Vistas, Procedimientos y Funciones, según el motor. El filtro busca nombres de bases y objetos. La estrella cambia la base o esquema predeterminado donde está disponible; revisa siempre el destino del editor.
+Al conectar, la conexión, sus bases y las carpetas de objetos quedan contraídas. Despliégalas con sus flechas cuando las necesites. Actualizar conserva lo que hayas abierto manualmente. El filtro puede desplegar coincidencias. La estrella selecciona la base o esquema predeterminado; comprueba el destino antes de ejecutar.
 
 ### Sesión abierta no significa consulta libre
 
@@ -138,11 +138,11 @@ El modo oscuro se activa desde la barra Workspace y recuerda tu preferencia.
 
 ### Autocompletado de tablas y campos
 
-Empieza a escribir un nombre o pulsa Ctrl+Espacio. Las sugerencias tienen en cuenta la base elegida. Para campos, usa la tabla o su alias seguido de punto, por ejemplo c. en una consulta sobre clientes AS c. Enter acepta una sugerencia.
+Empieza a escribir un nombre o pulsa Ctrl+Espacio. Las sugerencias tienen en cuenta la base elegida. Para campos, usa la tabla o su alias seguido de punto, por ejemplo c. en una consulta sobre clientes AS c. Tab o Enter aceptan la sugerencia seleccionada.
 
 ### Sangría y formato
 
-Tab introduce una tabulación; Mayús+Tab reduce la sangría. Si seleccionas varias líneas, se aplica al bloque. Pretty Formatter, o Alt+Mayús+F, da formato a la selección o al documento sin ejecutarlo.
+Sin sugerencias abiertas, Tab introduce una tabulación; Mayús+Tab reduce la sangría. Si seleccionas varias líneas, se aplica al bloque. Pretty Formatter, o Alt+Mayús+F, da formato a la selección o al documento sin ejecutarlo.
 
 ### Archivos y borradores
 
@@ -429,8 +429,8 @@ Los atajos actúan según el foco: editor, cuadrícula o explorador.
 | Ctrl+Enter | Ejecutar selección o sentencia del cursor. |
 | Ctrl+Mayús+Enter | Ejecutar solo el texto seleccionado. |
 | F5 | Ejecutar todo el documento SQL. |
-| Ctrl+Espacio / Enter | Mostrar sugerencias / aceptar sugerencia. |
-| Tab / Mayús+Tab | Indentar / reducir sangría en el editor. |
+| Ctrl+Espacio / Tab o Enter | Mostrar sugerencias / aceptar sugerencia. |
+| Tab / Mayús+Tab | Sin sugerencias: indentar / reducir sangría. |
 | Alt+Mayús+F | Pretty Formatter. |
 | Ctrl+O / Ctrl+S | Abrir / guardar archivo SQL. |
 | Ctrl+Mayús+S | Guardar SQL como. |
@@ -663,14 +663,54 @@ La preparación de edición y la comprobación de estructura usan el tiempo conf
 
 Copia la definición de una columna y añádela al borrador de otra tabla.
 
-### Copiar
+### Seleccionar y copiar
 
-Abre la estructura de la tabla origen y entra en Columnas. Botón derecho en la fila y Copiar campo. La definición queda disponible durante la sesión.
+En Columnas, marca las casillas de los campos. Mayús+clic selecciona un rango; la casilla de cabecera marca todos. Botón derecho sobre un campo seleccionado conserva el conjunto y permite Copiar campos. La copia permanece disponible durante la sesión.
 
 ### Pegar
 
-Abre la tabla destino, entra en Columnas y pulsa botón derecho, Pegar campo. Se conservan los atributos editables, los valores predeterminados y los indicadores de clave primaria o única. Si el nombre existe se añade un sufijo.
+Abre la tabla destino y usa botón derecho, Pegar campos. Se añaden juntos al borrador, con sus atributos editables, valores predeterminados e indicadores de clave primaria o única. Si un nombre existe, se añade un sufijo.
 
 ### Revisar la definición
 
 El pegado solo modifica el borrador. Revisa el tipo, las expresiones, los índices y el SQL antes de aplicar. Si ya existe un campo autoincremental, se impide pegar otro con ese atributo. Los campos con atributos avanzados no representables requieren copiar su DDL manualmente.
+
+## Conectar todos sin abrir consultas
+
+Conecta tus perfiles y abre una hoja SQL solo cuando la necesites.
+
+![Captura de Conectar todos sin abrir consultas](assets/28-conectar-todos.png)
+
+Botón de encendido junto a Actualizar en el Explorador y botón Conectar todos en Conexiones. Datos ficticios.
+
+### Desde cualquiera de los dos botones
+
+En Conexiones pulsa Conectar todos, o usa el icono de encendido junto a Actualizar en el Explorador. Se omiten las sesiones ya abiertas. Los dos botones se deshabilitan mientras dura el proceso.
+
+### Contraseñas y conexiones omitidas
+
+Se usan las contraseñas guardadas. Si falta una, aparece el formulario correspondiente; Cancelar omite ese perfil y continúa con el siguiente. Al terminar se muestra el resumen de conexiones abiertas, omitidas y con error.
+
+### Abrir y desplegar a tu ritmo
+
+Conectar no crea una consulta, tampoco al abrir SQLite o el laboratorio. Usa +, Ctrl+N o Abrir editor para trabajar. El Explorador queda contraído; sus flechas permiten abrir solo las conexiones, bases y carpetas necesarias.
+
+## Exportar e importar todo
+
+Traslada la configuración de dbFox en un único archivo .foxdb cifrado.
+
+![Captura de Exportar e importar todo](assets/29-copia-completa.png)
+
+Exportar todo solicita una contraseña propia del archivo y su confirmación.
+
+### Qué incluye la copia completa
+
+En Conexiones pulsa Exportar todo. Incluye perfiles, grupos, contraseñas guardadas, dashboards, favoritos SQL, ajustes y borradores de la interfaz. Elige y conserva la contraseña del archivo: será necesaria para restaurarlo.
+
+### Cómo restaurar
+
+Guarda los cambios pendientes y desconecta todas las bases. Pulsa Importar todo, introduce la contraseña y selecciona el archivo. Revisa el resumen y confirma: sustituye la configuración actual y recarga la aplicación. Los archivos anteriores quedan en Data/restore-backups.
+
+### Qué debes trasladar aparte
+
+No copia las bases de los servidores, los archivos SQL o SQLite externos ni las ediciones pendientes de las respuestas. Exportar conexiones y las exportaciones individuales de dashboards siguen disponibles para copias parciales.

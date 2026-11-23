@@ -18,6 +18,14 @@ def update_pages(pages):
         if replacements.get(page['title']):
             page['blocks'] = replacements[page['title']]
         page['blocks'] = [(title, text.replace('Pulsa Descartar para deshacer o Aplicar cambios para actualizar la copia local.', 'Pulsa Descartar para deshacer o Aplicar cambios para revisar el SQL y confirmar con Aplicar.')) for title, text in page.get('blocks', [])]
+        if page['title'] == 'Conexiones, grupos y objetos':
+            page['blocks'] = [(title, 'Al conectar, la conexión, sus bases y las carpetas de objetos quedan contraídas. Despliégalas con sus flechas cuando las necesites. Actualizar conserva lo que hayas abierto manualmente. El filtro puede desplegar coincidencias. La estrella selecciona la base o esquema predeterminado; comprueba el destino antes de ejecutar.' if title == 'Buscar y seleccionar una base' else text) for title, text in page['blocks']]
+        if page['title'] == 'Escribir, completar y guardar':
+            page['blocks'] = [(title, text.replace('Enter acepta una sugerencia.', 'Tab o Enter aceptan la sugerencia seleccionada.').replace('Tab introduce una tabulación;', 'Sin sugerencias abiertas, Tab introduce una tabulación;')) for title, text in page['blocks']]
+        if page['title'] == 'Practicar con el laboratorio':
+            page['blocks'] = [(title, text.replace('pulsa Probar el laboratorio. Escribe', 'pulsa Probar el laboratorio y abre una consulta con + o Ctrl+N. Escribe')) for title, text in page['blocks']]
+        if page['title'] == 'Atajos para el trabajo diario':
+            page['table'] = [(key.replace('Ctrl+Espacio / Enter', 'Ctrl+Espacio / Tab o Enter'), value.replace('Indentar / reducir sangría en el editor.', 'Sin sugerencias: indentar / reducir sangría.')) for key, value in page['table']]
     pages.extend([
         {'section':'CONEXIONES', 'title':'Conectar mediante SSH o socket local', 'lead':'MySQL y MariaDB incorporan tres métodos de conexión.', 'blocks':[
             ('TCP/IP y conexión local', 'Estándar TCP/IP usa el servidor y puerto de la base. Socket local / tubería utiliza una ruta disponible en el mismo equipo. El servicio debe tener habilitado ese transporte.'),
@@ -42,9 +50,19 @@ def update_pages(pages):
             ('Tiempo máximo', 'La preparación de edición y la comprobación de estructura usan el tiempo configurado. Al agotarlo se solicita cancelación y se informa del vencimiento. La sesión puede seguir ocupada hasta que el servidor confirme la cancelación.'),
         ]},
         {'section':'ESTRUCTURA', 'title':'Copiar campos entre tablas', 'lead':'Copia la definición de una columna y añádela al borrador de otra tabla.', 'blocks':[
-            ('Copiar', 'Abre la estructura de la tabla origen y entra en Columnas. Botón derecho en la fila y Copiar campo. La definición queda disponible durante la sesión.'),
-            ('Pegar', 'Abre la tabla destino, entra en Columnas y pulsa botón derecho, Pegar campo. Se conservan los atributos editables, los valores predeterminados y los indicadores de clave primaria o única. Si el nombre existe se añade un sufijo.'),
+            ('Seleccionar y copiar', 'En Columnas, marca las casillas de los campos. Mayús+clic selecciona un rango; la casilla de cabecera marca todos. Botón derecho sobre un campo seleccionado conserva el conjunto y permite Copiar campos. La copia permanece disponible durante la sesión.'),
+            ('Pegar', 'Abre la tabla destino y usa botón derecho, Pegar campos. Se añaden juntos al borrador, con sus atributos editables, valores predeterminados e indicadores de clave primaria o única. Si un nombre existe, se añade un sufijo.'),
             ('Revisar la definición', 'El pegado solo modifica el borrador. Revisa el tipo, las expresiones, los índices y el SQL antes de aplicar. Si ya existe un campo autoincremental, se impide pegar otro con ese atributo. Los campos con atributos avanzados no representables requieren copiar su DDL manualmente.'),
+        ]},
+        {'section':'CONEXIONES', 'title':'Conectar todos sin abrir consultas', 'lead':'Conecta tus perfiles y abre una hoja SQL solo cuando la necesites.', 'image':'28-conectar-todos.png', 'caption':'Botón de encendido junto a Actualizar en el Explorador y botón Conectar todos en Conexiones. Datos ficticios.', 'blocks':[
+            ('Desde cualquiera de los dos botones', 'En Conexiones pulsa Conectar todos, o usa el icono de encendido junto a Actualizar en el Explorador. Se omiten las sesiones ya abiertas. Los dos botones se deshabilitan mientras dura el proceso.'),
+            ('Contraseñas y conexiones omitidas', 'Se usan las contraseñas guardadas. Si falta una, aparece el formulario correspondiente; Cancelar omite ese perfil y continúa con el siguiente. Al terminar se muestra el resumen de conexiones abiertas, omitidas y con error.'),
+            ('Abrir y desplegar a tu ritmo', 'Conectar no crea una consulta, tampoco al abrir SQLite o el laboratorio. Usa +, Ctrl+N o Abrir editor para trabajar. El Explorador queda contraído; sus flechas permiten abrir solo las conexiones, bases y carpetas necesarias.'),
+        ]},
+        {'section':'COPIAS Y RESTAURACIÓN', 'title':'Exportar e importar todo', 'lead':'Traslada la configuración de dbFox en un único archivo .foxdb cifrado.', 'image':'29-copia-completa.png', 'caption':'Exportar todo solicita una contraseña propia del archivo y su confirmación.', 'blocks':[
+            ('Qué incluye la copia completa', 'En Conexiones pulsa Exportar todo. Incluye perfiles, grupos, contraseñas guardadas, dashboards, favoritos SQL, ajustes y borradores de la interfaz. Elige y conserva la contraseña del archivo: será necesaria para restaurarlo.'),
+            ('Cómo restaurar', 'Guarda los cambios pendientes y desconecta todas las bases. Pulsa Importar todo, introduce la contraseña y selecciona el archivo. Revisa el resumen y confirma: sustituye la configuración actual y recarga la aplicación. Los archivos anteriores quedan en Data/restore-backups.'),
+            ('Qué debes trasladar aparte', 'No copia las bases de los servidores, los archivos SQL o SQLite externos ni las ediciones pendientes de las respuestas. Exportar conexiones y las exportaciones individuales de dashboards siguen disponibles para copias parciales.'),
         ]},
     ])
     return pages
