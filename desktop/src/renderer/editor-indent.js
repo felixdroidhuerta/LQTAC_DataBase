@@ -17,6 +17,8 @@ export function initEditorIndent() {
   document.addEventListener('keydown', event => {
     const editor = event.target;
     if (event.key !== 'Tab' || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || !(editor instanceof HTMLTextAreaElement) || editor.readOnly || editor.disabled || !['query', 'trigger-body', 'object-source'].includes(editor.id)) return;
+    // The completion list handles Tab at the editor; do not intercept it in capture.
+    if(editor.id==='query'&&!event.shiftKey&&editor.getAttribute('aria-expanded')==='true')return;
     event.preventDefault(); event.stopImmediatePropagation();
     const edit = indentationEdit(editor.value, editor.selectionStart, editor.selectionEnd, event.shiftKey);
     const direction = editor.selectionDirection, top = editor.scrollTop, left = editor.scrollLeft;
