@@ -39,6 +39,15 @@ app.whenReady().then(async () => {
     await until("!document.querySelector('#table-review-dialog').open && document.querySelectorAll('.structure-table tbody tr').length===3 && !document.querySelector('#preview-table').disabled");
     assert.equal(fixture.queries.filter(sql => sql.startsWith('ALTER TABLE')).length, 1);
     console.log('Designer: inspect, column edit, SQL review and single application passed');
+    await js(`document.querySelector('[data-column="0"] [data-select-column]').click();document.querySelector('[data-column="2"] [data-select-column]').dispatchEvent(new MouseEvent('click',{bubbles:true,shiftKey:true}))`);
+    assert.equal(await js(`document.querySelectorAll('.structure-column-selected').length`),3);
+    assert.equal(await js(`document.querySelectorAll('[data-select-column]:checked').length`),3);
+    assert.equal(await js(`document.querySelector('[data-select-all-columns]').checked`),true);
+    await js(`document.querySelector('[data-column="0"] [data-select-column]').click()`);
+    assert.equal(await js(`document.querySelectorAll('.structure-column-selected').length`),2);
+    assert.equal(await js(`document.querySelector('[data-select-all-columns]').indeterminate`),true);
+    await js(`document.querySelector('[data-column="1"]').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:400,clientY:400}));document.querySelector('#structure-column-menu button').click()`);
+    assert.equal(await js(`document.querySelectorAll('.structure-column-selected').length`),2);
     await js(`document.querySelector('[data-designer-pane=triggers]').click();document.querySelector('#designer-content .designer-object-head button').click()`);
     await until("document.querySelector('#trigger-editor-dialog').open && !document.querySelector('#review-trigger').disabled");
     assert.equal(await js('document.querySelector("#trigger-body").value'), 'SET NEW.nombre = TRIM(NEW.nombre)');
@@ -72,7 +81,10 @@ app.whenReady().then(async () => {
     await until("document.querySelector('#designer-title').textContent==='test.nueva_tabla' && !document.querySelector('#preview-table').disabled");
     await js(`document.querySelector('[data-designer-pane="columns"]').click()`);
     await js(`document.querySelector('#designer-content').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:400,clientY:400}));document.querySelector('#structure-column-menu button:last-child').click()`);
-    assert.equal(await js(`document.querySelector('.structure-table tbody tr:last-child [data-field="name"]').value`),copiedName);
+    assert.equal(await js(`document.querySelectorAll('.structure-table tbody tr').length`),3);
+    assert.equal(await js(`document.querySelector('.structure-table tr[data-column="1"] [data-field="name"]').value`),copiedName);
+    assert.equal(await js(`document.querySelector('.structure-table tbody tr:last-child [data-field="name"]').value`),'notas');
+    assert.equal(await js(`document.querySelectorAll('.structure-column-selected').length`),2);
     await js(`document.querySelector('#preview-table').click()`);
     await until("document.querySelector('#table-review-dialog').open && !document.querySelector('#apply-table').disabled");
     assert.match(await js('document.querySelector("#table-review-sql").textContent'), /CREATE TABLE `test`\.`nueva_tabla`/);

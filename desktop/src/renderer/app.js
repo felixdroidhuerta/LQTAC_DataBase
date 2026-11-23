@@ -487,9 +487,13 @@ let connectionBackupMode = null;
 function openConnectionBackup(mode) {
   if (busy || !api) return;
   connectionBackupMode=mode;
-  const exporting=mode==='export';
+  const exporting=mode==='export'||mode==='full-export',full=mode.startsWith('full-');
   $('#connection-backup-title').textContent=exporting?'Exportar conexiones':'Importar conexiones';
   $('#connection-backup-description').textContent=exporting?'La copia incluirá conexiones, grupos y contraseñas guardadas. Elige una contraseña para cifrar el archivo .foxdb. Guárdala: la necesitarás para restaurarlo.':'Introduce la contraseña de la copia y selecciona el archivo .foxdb o .lqtdb. Después podrás revisar el resumen antes de restaurar.';
+  if(full){
+    $('#connection-backup-title').textContent=exporting?'Exportar todo':'Importar todo';
+    $('#connection-backup-description').textContent=exporting?'Guarda conexiones, grupos, contraseñas guardadas, dashboards, favoritos SQL, ajustes y consultas guardadas en la interfaz en un único archivo .foxdb cifrado. No incluye las bases de datos del servidor ni archivos externos SQL o SQLite. Conserva la contraseña para restaurarlo.':'Selecciona una copia completa .foxdb e introduce su contraseña. Se mostrará un resumen antes de sustituir la configuración actual. Desconecta las bases de datos y guarda los cambios pendientes antes de continuar.';
+  }
   $('#connection-backup-password').value=''; $('#connection-backup-confirm').value='';
   $('#connection-backup-confirm-label').hidden=!exporting;
   $('#connection-backup-confirm').required=exporting;
@@ -498,17 +502,31 @@ function openConnectionBackup(mode) {
 }
 $('#export-connections').onclick=()=>openConnectionBackup('export');
 $('#import-connections').onclick=()=>openConnectionBackup('import');
+$('#export-all').onclick=()=>openConnectionBackup('full-export');
+$('#import-all').onclick=()=>openConnectionBackup('full-import');
 $('#connection-backup-cancel').onclick=()=>$('#connection-backup-dialog').close();
 $('#connection-backup-dialog').addEventListener('cancel',event=>{if(busy)event.preventDefault();});
 $('#connection-backup-dialog').addEventListener('close',()=>{ $('#connection-backup-password').value=''; $('#connection-backup-confirm').value=''; connectionBackupMode=null; });
 $('#connection-backup-form').onsubmit=async event=>{
   event.preventDefault(); if(busy || !event.target.reportValidity())return;
   const mode=connectionBackupMode, password=$('#connection-backup-password').value;
-  if(mode==='export' && password!==$('#connection-backup-confirm').value){$('#connection-backup-error').textContent='Las contraseñas no coinciden.';return;}
+  if((mode==='export'||mode==='full-export') && password!==$('#connection-backup-confirm').value){$('#connection-backup-error').textContent='Las contraseñas no coinciden.';return;}
   const buttons=[...event.target.querySelectorAll('button')]; buttons.forEach(button=>button.disabled=true); busy=true;
   $('#connection-backup-error').textContent='';
   try {
-    if(mode==='export') {
+    if(mode==='full-export'){
+      const state={};for(const key of Object.keys(localStorage))if(/^lqtac\./.test(key))state[key]=localStorage.getItem(key);
+      const result=await api.exportAll(password,state);
+      if(result){$('#connection-backup-dialog').close();notify(`Copia completa exportada: ${result.profiles} conexiones, ${result.passwords} contraseñas y ${result.dashboards} dashboards.`);}
+    }else if(mode==='full-import'){
+      const result=await api.prepareFullImport(password);if(!result)return;
+      if(!confirm(`La copia contiene ${result.profiles} conexiones, ${result.groups} grupos, ${result.passwords} contraseñas, ${result.dashboards} dashboards y ${result.favorites} favoritos SQL.\n\nSe sustituirá la configuración actual y se recargará la aplicación. Los cambios pendientes en resultados no se guardan. Se conservará una copia local de los archivos anteriores.\n\n¿Importar todo?`)){await api.cancelFullImport(result.token);return;}
+      const restored=await api.finishFullImport(result.token);
+      for(const key of Object.keys(localStorage))if(/^lqtac\./.test(key))localStorage.removeItem(key);
+      for(const [key,value]of Object.entries(restored.localStorage))localStorage.setItem(key,value);
+      $('#connection-backup-dialog').close();
+      await api.reloadAfterFullImport();
+    }else if(mode==='export') {
       const result=await api.exportConnections(password);
       if(result){$('#connection-backup-dialog').close();notify(`Copia exportada: ${result.profiles} conexiones y ${result.groups} grupos.`);}
     } else {

@@ -66,3 +66,6 @@ html[data-palette=color] .structure-table tbody tr:nth-child(even) td { backgrou
 html[data-palette=color] .structure-table tbody tr:hover td { background:var(--color-active); }
 html[data-palette=color] :is(.designer-code,#table-review-sql) { background:var(--color-base);color:#f1ebef;border-color:var(--color-border); }
 #structure-column-menu button:disabled{opacity:.45;cursor:default}.structure-table tr.structure-column-selected td{box-shadow:inset 0 -2px var(--blue)}
+.structure-table .structure-selection-cell{position:sticky;left:0;min-width:36px;width:36px;text-align:center;z-index:1}
+.structure-table th.structure-selection-cell{z-index:3}
+.structure-table .structure-selection-cell input[type=checkbox]{width:16px;height:16px;min-width:16px;cursor:pointer;accent-color:var(--blue)}

@@ -22,38 +22,72 @@ const emptyColumn = name => ({ originalName: '', name, type: 'VARCHAR(255)', nul
 
 export function createTableDesigner({ api, show, runTask, onStatus, onQuery, notify }) {
   let original = null, draft = null, dirty = false, pane = 'columns', review = null, pending = false, session = null, metadataUnknown = false;
-  let copiedColumn=null,selectedColumn=-1;
+  let copiedColumns=[],selectedColumns=new Set(),selectionAnchor=null;
+  function paintSelection(){
+    $('#designer-content').querySelectorAll('tr[data-column]').forEach(row=>{
+      const selected=selectedColumns.has(draft.columns[Number(row.dataset.column)]);
+      row.classList.toggle('structure-column-selected',selected);row.setAttribute('aria-selected',String(selected));
+      const check=row.querySelector('[data-select-column]');if(check)check.checked=selected;
+    });
+    const all=$('#designer-content [data-select-all-columns]');
+    if(all){const count=draft.columns.filter(column=>selectedColumns.has(column)).length;all.checked=count===draft.columns.length;all.indeterminate=count>0&&count<draft.columns.length;}
+  }
+  function selectColumn(column,event){
+    if(event.shiftKey&&draft.columns.includes(selectionAnchor)){
+      if(!event.ctrlKey&&!event.metaKey)selectedColumns.clear();
+      const start=draft.columns.indexOf(selectionAnchor),end=draft.columns.indexOf(column);
+      draft.columns.slice(Math.min(start,end),Math.max(start,end)+1).forEach(item=>selectedColumns.add(item));
+    }else{
+      if(event.ctrlKey||event.metaKey){if(selectedColumns.has(column))selectedColumns.delete(column);else selectedColumns.add(column);}
+      else selectedColumns=new Set([column]);
+      selectionAnchor=column;
+    }
+    paintSelection();
+  }
+  $('#designer-content').addEventListener('click',event=>{
+    const row=event.target.closest('tr[data-column]');
+    if(pane==='columns'&&draft&&!pending&&row&&!event.target.closest('button')&&(event.ctrlKey||event.metaKey||event.shiftKey||!selectedColumns.size))selectColumn(draft.columns[Number(row.dataset.column)],event);
+  });
   const columnMenu=el('div',undefined,'connection-context');columnMenu.id='structure-column-menu';columnMenu.hidden=true;columnMenu.setAttribute('role','menu');
   const copyField=button('Copiar campo',()=>{
-    const column=draft?.columns[selectedColumn];if(!column)return;
-    if(column.unsupported){notify('Este campo contiene atributos avanzados. Copia su definición desde DDL para conservarlos.');columnMenu.hidden=true;return;}
+    const columns=draft?.columns.filter(column=>selectedColumns.has(column));if(!columns?.length)return;
+    if(columns.some(column=>column.unsupported)){notify('La selección contiene campos con atributos avanzados. Copia su definición desde DDL para conservarlos.');columnMenu.hidden=true;return;}
+    copiedColumns=columns.map(column=>{
     const definition=emptyColumn(column.name);
     for(const key of Object.keys(definition))if(key!=='originalName'&&column[key]!==undefined)definition[key]=copy(column[key]);
-    copiedColumn={definition,primary:draft.indexes.some(item=>item.kind==='PRIMARY'&&item.columns.some(part=>part.name===column.name)),unique:draft.indexes.some(item=>item.kind==='UNIQUE'&&item.columns.length===1&&item.columns[0].name===column.name)};
-    columnMenu.hidden=true;notify(`Campo ${column.name} copiado. Abre la estructura de destino y usa Pegar campo.`);
+    return {definition,primary:draft.indexes.some(item=>item.kind==='PRIMARY'&&item.columns.some(part=>part.name===column.name)),unique:draft.indexes.some(item=>item.kind==='UNIQUE'&&item.columns.length===1&&item.columns[0].name===column.name)};
+    });
+    columnMenu.hidden=true;notify(`${columns.length} campo(s) copiado(s). Abre la estructura de destino y usa Pegar campos.`);
   });
   const pasteField=button('Pegar campo',()=>{
-    columnMenu.hidden=true;if(!copiedColumn||!draft||pending)return;
+    columnMenu.hidden=true;if(!copiedColumns.length||!draft||pending)return;
+    if(copiedColumns.filter(item=>item.definition.autoIncrement).length+draft.columns.filter(item=>item.autoIncrement).length>1){notify('La tabla destino solo puede tener un campo autoincremental.');return;}
+    selectedColumns.clear();
+    for(const copiedColumn of copiedColumns){
     const column=copy(copiedColumn.definition);
     if(column.autoIncrement&&draft.columns.some(item=>item.autoIncrement)){notify('La tabla destino ya tiene un campo autoincremental. Revisa su estructura antes de pegar otro.');return;}
     const base=column.name.slice(0,55);let suffix=1;
     while(draft.columns.some(item=>item.name.toLowerCase()===column.name.toLowerCase()))column.name=`${base}_${suffix++}`;
     column.originalName='';draft.columns.push(column);
+    selectedColumns.add(column);
     if(copiedColumn.primary)columnFlag(column,'PRIMARY',true);
     if(copiedColumn.unique)columnFlag(column,'UNIQUE',true);
+    }
     changed();renderPane();
     $('#designer-content').querySelector('.structure-table tbody tr:last-child input')?.focus();
-    notify(`Campo ${column.name} añadido al borrador. Revisa los cambios SQL antes de aplicarlos.`);
+    notify(`${copiedColumns.length} campo(s) añadido(s) al borrador. Revisa los cambios SQL antes de aplicarlos.`);
   });
   copyField.setAttribute('role','menuitem');pasteField.setAttribute('role','menuitem');
   columnMenu.append(copyField,pasteField);document.body.append(columnMenu);
   $('#designer-content').addEventListener('contextmenu',event=>{
     if(pane!=='columns'||!draft||pending)return;
     event.preventDefault();
-    const row=event.target.closest('tr[data-column]');selectedColumn=row?Number(row.dataset.column):-1;
-    $('#designer-content').querySelectorAll('.structure-column-selected').forEach(item=>item.classList.remove('structure-column-selected'));
-    row?.classList.add('structure-column-selected');
-    copyField.disabled=selectedColumn<0;pasteField.disabled=!copiedColumn;
+    const row=event.target.closest('tr[data-column]'),column=row?draft.columns[Number(row.dataset.column)]:null;
+    if(column&&!selectedColumns.has(column))selectColumn(column,event);
+    const count=draft.columns.filter(item=>selectedColumns.has(item)).length;
+    copyField.textContent=count>1?`Copiar ${count} campos`:'Copiar campo';
+    pasteField.textContent=copiedColumns.length>1?`Pegar ${copiedColumns.length} campos`:'Pegar campo';
+    copyField.disabled=!count;pasteField.disabled=!copiedColumns.length;
     columnMenu.hidden=false;
     columnMenu.style.left=Math.max(8,Math.min(event.clientX,innerWidth-columnMenu.offsetWidth-8))+'px';
     columnMenu.style.top=Math.max(8,Math.min(event.clientY,innerHeight-columnMenu.offsetHeight-8))+'px';
@@ -116,12 +150,24 @@ export function createTableDesigner({ api, show, runTask, onStatus, onQuery, not
     const actions = el('div', undefined, 'structure-actions');
     actions.append(button('＋ Añadir columna', () => { draft.columns.push(emptyColumn(`columna_${draft.columns.length + 1}`)); changed(); renderPane(); }), el('p', 'PK: primaria · NN: no nulo · UQ: único · B: binario · UN: unsigned · ZF: zerofill · AI: autoincremento · G: generada'));
     root.append(actions);
+    root.append(el('p','Marca las casillas para seleccionar campos. Mayús+clic: seleccionar un rango. Botón derecho: copiar y pegar la selección.','structure-selection-help'));
     const table = el('table', undefined, 'structure-table'); const head = el('thead'); const titles = el('tr');
+    const selectionHead=el('th',undefined,'structure-selection-cell'),selectAll=input(false,()=>{},'checkbox');
+    selectAll.dataset.selectAllColumns='';selectAll.setAttribute('aria-label','Seleccionar todos los campos');
+    const selectedCount=draft.columns.filter(column=>selectedColumns.has(column)).length;
+    selectAll.checked=selectedCount===draft.columns.length;selectAll.indeterminate=selectedCount>0&&selectedCount<draft.columns.length;
+    selectAll.onclick=()=>{selectedColumns=selectAll.checked?new Set(draft.columns):new Set();selectionAnchor=draft.columns[0]??null;paintSelection();};
+    selectionHead.append(selectAll);titles.append(selectionHead);
     for (const label of ['Nombre', 'Tipo', 'PK', 'NN', 'UQ', 'B', 'UN', 'ZF', 'AI', 'G', 'Predeterminado', 'Valor / expresión SQL', 'Expresión generada', 'Almacenamiento G', 'ON UPDATE', 'Charset', 'Collation', 'Comentario', 'Acciones']) titles.append(el('th', label));
     head.append(titles); table.append(head); const body = el('tbody'); table.append(body);
     draft.columns.forEach((column, index) => {
       const row = el('tr'); row.dataset.column = String(index);
+      row.classList.toggle('structure-column-selected',selectedColumns.has(column));row.setAttribute('aria-selected',String(selectedColumns.has(column)));
       const cell = control => { const td = el('td'); td.append(control); row.append(td); return control; };
+      const selection=input(selectedColumns.has(column),()=>{},'checkbox');selection.dataset.selectColumn='';
+      selection.setAttribute('aria-label',`Seleccionar campo ${column.name}`);
+      selection.onclick=event=>{event.stopPropagation();selectColumn(column,{ctrlKey:true,shiftKey:event.shiftKey});};
+      cell(selection).parentElement.classList.add('structure-selection-cell');
       const bind = (key, type = 'text', after) => {
         const control = input(column[key], value => { column[key] = value; after?.(value); changed(); }, type);
         control.dataset.field = key; control.setAttribute('aria-label', `${column.name}: ${key}`); return control;
@@ -229,6 +275,7 @@ export function createTableDesigner({ api, show, runTask, onStatus, onQuery, not
     controls();
   }
   function load(snapshot) {
+    selectedColumns.clear();selectionAnchor=null;
     original = snapshot; draft = copy(snapshot); dirty = false; review = null; metadataUnknown = false;
     $('#designer-error').textContent = ''; title(); renderProperties(); renderPane(); controls();
   }
@@ -241,6 +288,7 @@ export function createTableDesigner({ api, show, runTask, onStatus, onQuery, not
       session = `${status.profileId}|${status.name}`;
       if (table) load(await api.inspectTable(schema, table));
       else {
+        selectedColumns.clear();selectionAnchor=null;
         original = null; dirty = true; review = null; metadataUnknown = false;
         const id = { ...emptyColumn('id'), type: 'INT', nullable: false, autoIncrement: true };
         draft = { schema, name: 'nueva_tabla', engine: 'InnoDB', charset: '', collation: '', comment: '', columns: [id], indexes: [{ originalName: '', name: 'PRIMARY', kind: 'PRIMARY', method: 'BTREE', columns: [{ name: 'id', prefix: 0, order: 'ASC' }], comment: '', visible: true }], foreignKeys: [] };

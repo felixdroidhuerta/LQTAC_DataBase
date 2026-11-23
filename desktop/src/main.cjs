@@ -19,6 +19,7 @@ const { pathToFileURL } = require('node:url');
 const { SQLiteAdapter } = require('./adapters/sqlite.cjs');
 const { ConnectionStore } = require('./connections.cjs');
 const { CredentialStore } = require('./credentials.cjs');
+const fullBackup = require('./full-backup.cjs');
 const { encryptPackage, decryptPackage, restorePackage, MAX_BYTES: MAX_CONNECTION_BACKUP } = require('./connection-transfer.cjs');
 const { MySQLAdapter } = require('./adapters/mysql.cjs');
 const { ClickHouseAdapter } = require('./adapters/clickhouse.cjs');
@@ -228,6 +229,38 @@ app.whenReady().then(() => {
   const connections = new ConnectionStore(app.getPath('userData'));
   const credentials = new CredentialStore(app.getPath('userData'), safeStorage);
   let pendingConnectionImport = null;
+  let pendingFullImport = null,fullImportReload=false;
+  register('backup:reload',()=>{
+    if(!fullImportReload)throw Error('No hay una importación pendiente de recargar.');
+    fullImportReload=false;setTimeout(()=>window.webContents.reload(),50);return true;
+  });
+  register('backup:export', (passphrase,localState) => exclusive(async()=>{
+    const {backup,summary}=await fullBackup.collectBackup(app.getPath('userData'),connections,credentials,localState,app.getVersion());
+    if(summary.skippedPasswords)throw Error('No se pueden recuperar todas las contraseñas guardadas en este equipo. Vuelve a guardarlas antes de exportar todo.');
+    const content=await fullBackup.encryptBackup(backup,passphrase);
+    const chosen=await dialog.showSaveDialog(window,{title:'Exportar todo',defaultPath:'dbFox-copia-completa.foxdb',filters:[{name:'Copia completa dbFox',extensions:['foxdb']}]});
+    if(chosen.canceled)return null;
+    await fs.writeFile(chosen.filePath,content,{mode:0o600});return summary;
+  },{allowPending:true}));
+  register('backup:import-prepare',async passphrase=>{
+    pendingFullImport=null;
+    const chosen=await dialog.showOpenDialog(window,{title:'Importar todo',properties:['openFile'],filters:[{name:'Copia completa dbFox',extensions:['foxdb','lqtdb']}]});
+    if(chosen.canceled)return null;
+    const file=chosen.filePaths[0];if((await fs.stat(file)).size>fullBackup.MAX_BYTES*2)throw Error('El archivo supera el tamaño permitido.');
+    const backup=await fullBackup.decryptBackup(await fs.readFile(file,'utf8'),passphrase),token=randomUUID();
+    pendingFullImport={token,backup,expires:Date.now()+300000};return {token,...fullBackup.summarize(backup)};
+  });
+  register('backup:import-cancel',token=>{if(pendingFullImport?.token===token)pendingFullImport=null;});
+  register('backup:import-finish',token=>exclusive(async()=>{
+    const pending=pendingFullImport;pendingFullImport=null;
+    if(!pending||pending.token!==token||pending.expires<Date.now())throw Error('La importación ha caducado. Selecciona el archivo de nuevo.');
+    rememberActive();if(adapter||sessions.size)throw Error('Desconecta todas las bases de datos antes de importar todo.');
+    const result=await fullBackup.restoreBackup(app.getPath('userData'),connections,credentials,pending.backup);
+    settings.value=new SettingsStore(app.getPath('userData')).get();
+    dashboardQueries.entries.clear();
+    fullImportReload=true;
+    return result;
+  }));
   const sqlFiles=new SQLFiles(app.getPath('userData'));
   register('sql:open',async()=>{const result=await dialog.showOpenDialog(window,{title:'Abrir archivo SQL',properties:['openFile'],filters:[{name:'Consultas SQL',extensions:['sql']},{name:'Texto',extensions:['txt']}]});return result.canceled?null:sqlFiles.open(result.filePaths[0]);});
   register('sql:save',request=>sqlFiles.save(request,async()=>{const result=await dialog.showSaveDialog(window,{title:'Guardar archivo SQL',defaultPath:'consulta.sql',filters:[{name:'Consultas SQL',extensions:['sql']}]});return result.canceled?null:result.filePath;}));

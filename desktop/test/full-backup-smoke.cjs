@@ -1,0 +1,43 @@
+const {app,BrowserWindow,dialog}=require('electron');
+const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),assert=require('node:assert/strict');
+const {startMySQLFixture}=require('./mysql-fixture.cjs');
+const {DashboardStore}=require('../src/dashboards.cjs');
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'dbfox-full-ui-')),file=path.join(dir,'complete.foxdb');app.setPath('userData',dir);
+app.on('browser-window-created',(_e,w)=>{w.hide();w.webContents.setBackgroundThrottling(false);});
+dialog.showSaveDialog=async()=>({canceled:false,filePath:file});dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]});
+require('../src/main.cjs');
+const timeout=setTimeout(()=>{console.error('Full backup timed out');app.exit(1);},40000);
+app.whenReady().then(async()=>{
+ const w=BrowserWindow.getAllWindows()[0],fixture=await startMySQLFixture(),js=code=>w.webContents.executeJavaScript(code);
+ const until=expression=>js(`new Promise((resolve,reject)=>{const start=Date.now();function poll(){if(${expression})return resolve();if(Date.now()-start>10000)return reject(Error('Timeout'));setTimeout(poll,40);}poll()})`);
+ try{
+  if(w.webContents.isLoading())await new Promise(r=>w.webContents.once('did-finish-load',r));
+  const profile=await js(`window.lqtac.saveConnection(${JSON.stringify(fixture.profile)})`);
+  await js(`window.lqtac.createConnectionGroup('Equipo',[${JSON.stringify(profile.id)}]);`);
+  await js(`window.lqtac.connectProfile(${JSON.stringify(profile.id)},'fixture-test-password',true)`);
+  await js(`window.lqtac.disconnectConnection(${JSON.stringify(profile.id)})`);
+  await new DashboardStore(dir).save({format:'LQTAC Dashboard',version:1,id:'test-board',name:'Mi dashboard',revision:0,datasets:[],widgets:[]});
+  await js(`document.querySelector('#export-all').click();document.querySelector('#connection-backup-password').value='clave segura 123';document.querySelector('#connection-backup-confirm').value='clave segura 123';document.querySelector('#connection-backup-form').requestSubmit()`);
+  await until(`!document.querySelector('#connection-backup-dialog').open`);assert.ok(fs.existsSync(file));
+  console.log('Full backup exported');
+  assert.ok(!fs.readFileSync(file,'utf8').includes('fixture-test-password'));
+  await js(`window.lqtac.saveConnection(${JSON.stringify({...fixture.profile,name:'Temporal'})})`);
+  fs.unlinkSync(path.join(dir,'dashboards','test-board.json'));
+  await js(`window.confirm=()=>true;document.querySelector('#import-all').click();document.querySelector('#connection-backup-password').value='clave segura 123'`);
+  console.log('Import dialog',await js(`({open:document.querySelector('#connection-backup-dialog').open,title:document.querySelector('#connection-backup-title').textContent,valid:document.querySelector('#connection-backup-form').checkValidity()})`));
+  const loaded=new Promise(resolve=>w.webContents.once('did-finish-load',resolve));
+  await js(`document.querySelector('#connection-backup-form').requestSubmit()`);
+  console.log('Import submitted',await js(`({busy:document.querySelector('#connection-backup-submit').disabled,error:document.querySelector('#connection-backup-error').textContent})`));
+  await until(`!document.querySelector('#connection-backup-dialog')?.open || document.querySelector('#connection-backup-error').textContent`);
+  const error=await js(`document.querySelector('#connection-backup-error')?.textContent`);assert.ok(!error,error);
+  await loaded;
+  const overview=await js('window.lqtac.connectionOverview()');assert.equal(overview.profiles.length,1);assert.equal(overview.groups[0].name,'Equipo');
+  assert.equal((await js(`window.lqtac.credentialStatus(${JSON.stringify(profile.id)})`)).saved,true);
+  assert.equal((await new DashboardStore(dir).read('test-board')).name,'Mi dashboard');
+  await js(`window.lqtac.connectProfile(${JSON.stringify(profile.id)},null,true)`);
+  const pending=await js(`window.lqtac.prepareFullImport('clave segura 123')`);
+  await assert.rejects(js(`window.lqtac.finishFullImport(${JSON.stringify(pending.token)})`),/Desconecta/);
+  console.log('PASS: Exportar todo / Importar todo, encrypted credentials, dashboards, reload and connected-session protection');
+  clearTimeout(timeout);await fixture.close();app.exit(0);
+ }catch(error){console.error(error);clearTimeout(timeout);await fixture.close();app.exit(1);}
+});
