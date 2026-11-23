@@ -53,6 +53,7 @@ app.whenReady().then(async () => {
     await assert.rejects(js(`window.lqtac.planExecution('SELECT 1;SELECT 2;SELECT 3;',{mode:'all',cursor:0},'local')`),/máximo 2/);
     await assert.rejects(js(`window.lqtac.executeBatch(['SELECT 1','SELECT 2','SELECT 3'],'local',1000,{database:'main'},'limit-test')`),/supera 2/);
     await js('window.lqtac.saveSettings({queryTimeoutSeconds:75,maxStatements:250})');
+    await js('document.querySelector("#new-query").click()');
     await until('!document.querySelector("#sql").classList.contains("hidden") && !document.querySelector("#run-query").disabled');
     await js('(()=>{const e=document.querySelector("#query");e.value="SELECT 1;";e.dispatchEvent(new Event("input"));e.focus();e.setSelectionRange(0,0)})()');
     const key = async (modifiers = []) => { window.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab', modifiers }); window.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab', modifiers }); await js('new Promise(resolve=>setTimeout(resolve,40))'); };
@@ -64,7 +65,7 @@ app.whenReady().then(async () => {
     await key(['shift']); assert.equal(await js('document.querySelector("#query").value'), 'SELECT\n  1;\nSELECT 2;');
     await js("(()=>{const e=document.querySelector('#query');e.value='SELECT * FROM pro';e.focus();e.setSelectionRange(e.value.length,e.value.length);e.dispatchEvent(new Event('input'))})()");
     await until('document.querySelector("#table-completions").getAttribute("class").includes("hidden") === false');
-    await key(); assert.equal(await js('document.querySelector("#query").value'), 'SELECT * FROM pro\t'); assert.equal(await js('document.activeElement.id'), 'query');
+    await key(); assert.equal(await js('document.querySelector("#query").value'), 'SELECT * FROM "proyectos"'); assert.equal(await js('document.activeElement.id'), 'query');
     await js(`(()=>{const e=document.querySelector('#trigger-body');document.querySelector('#trigger-editor-dialog').showModal();e.value=${JSON.stringify('BEGIN\nEND')};e.focus();e.setSelectionRange(0,0)})()`);
     await key(); assert.equal(await js('document.querySelector("#trigger-body").value'), '\tBEGIN\nEND'); await js('document.querySelector("#trigger-editor-dialog").close()');
     await js("(()=>{const e=document.querySelector('#object-source');e.closest('dialog').showModal();e.value='CREATE VIEW';e.focus();e.setSelectionRange(0,0)})()");
@@ -89,7 +90,7 @@ app.whenReady().then(async () => {
     await until('document.querySelector(".profile-row .primary")?.textContent === "Abrir editor"');
     await js('document.querySelector(".profile-row .primary").click()');
     await until('document.querySelector("#connection-label").textContent === "Timeout fixture" && !document.querySelector("#run-query").disabled');
-    assert.equal(await js('document.querySelectorAll(".editor-caption .tool-separator").length'), 3);
+    assert.equal(await js('document.querySelectorAll(".editor-caption .tool-separator").length'), 4);
     assert.equal(await js('document.querySelectorAll(".results-header .tool-separator").length'), 4);
     await js(`(()=>{const editor=document.querySelector('#query');editor.value=${JSON.stringify('SELECT wait_forever;\nUPDATE must_not_run;')};editor.setSelectionRange(0,0);editor.dispatchEvent(new Event('input'));document.querySelector('#run-all').click()})()`);
     await until('!document.querySelector("#stop-query").disabled');
