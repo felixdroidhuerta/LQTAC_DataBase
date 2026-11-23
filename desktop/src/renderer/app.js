@@ -5,7 +5,6 @@ import { initPanelLayout } from './layout.js';
 import { createTableDesigner } from './table-designer.js';
 import { attachSQLHighlight } from './sql-highlight.js';
 import {initSQLFind} from './sql-find.js';
-import { initialQuery } from './dialect.js';
 import { initOutputs } from './outputs.js';
 import { initQueryTools } from './query-tools.js';
 import { createObjectEditor } from './object-editor.js';
@@ -293,16 +292,10 @@ async function connect(kind) {
   await performConnection(kind);
 }
 async function performConnection(kind) {
-  if(!resultsGrid.confirmDiscard())return;
   await task(async () => {
     const data = await api[kind]();
     if (!data) return;
     updateConnection(data);
-    $('#results').replaceChildren(element('div', 'Conexión abierta. Ejecuta una consulta para ver sus resultados.', 'result-placeholder'));
-    $('#query-info').textContent = 'Listo para ejecutar';
-    if (kind === 'demo') newQuery(defaultSql);
-    else if (kind === 'create') newQuery('-- Base SQLite nueva. Usa Guardar copia para conservar los cambios.\n');
-    else newQuery('-- Base abierta como copia en memoria\nSELECT name, type FROM sqlite_master ORDER BY name;');
     notify(kind === 'create' ? `${data.name}: creada. Usa Guardar copia para conservar los cambios posteriores.` : `${data.name}: lista para trabajar`);
   });
 }
@@ -473,7 +466,7 @@ async function loadProfiles() {
       row.append(element('span', '⇄', 'card-icon'), copy, element('span', connected ? 'Conectado' : supported ? 'Sin conectar' : 'Driver pendiente', 'pill'), edit);
       if (supported) {
         const button = element('button', connected ? 'Abrir editor' : 'Conectar', 'primary');
-        button.onclick = () => connected ? activateSaved(profile.id) : requestRemote(profile);
+        button.onclick = () => connected ? activateSaved(profile.id,true) : requestRemote(profile);
         row.append(button);
       }
       root.append(row);
@@ -482,6 +475,32 @@ async function loadProfiles() {
   } catch (error) { root.replaceChildren(element('p', `No se pudieron cargar las conexiones: ${error.message}`, 'error')); }
 }
 for (const id of ['#new-connection', '#new-connection-home']) $(id).onclick = () => { show('connections'); editProfile(); };
+let connectingAll=false;
+$('#connect-all').onclick=async()=>{
+  if(busy||connectingAll||!api)return;
+  connectingAll=true;const button=$('#connect-all');button.disabled=true;
+  let connected=0,already=0,skipped=0,failed=0;
+  try{
+    const profiles=await api.listConnections();
+    for(const profile of profiles){
+      if(!supportedEngines.includes(profile.engine)){skipped++;continue;}
+      const overview=await api.connectionOverview();
+      if(overview.sessions.some(item=>item.profileId===profile.id&&item.connected)){already++;continue;}
+      button.textContent=`Conectando: ${profile.name}`;
+      try{
+        const result=await task(()=>connectSavedOrPrompt(profile));
+        if(result===undefined&&!$('#credentials-dialog').open){failed++;continue;}
+        if($('#credentials-dialog').open)await new Promise(resolve=>$('#credentials-dialog').addEventListener('close',resolve,{once:true}));
+        while(busy)await new Promise(resolve=>setTimeout(resolve,50));
+        const current=await api.connectionOverview();
+        if(current.sessions.some(item=>item.profileId===profile.id&&item.connected))connected++;else skipped++;
+      }catch(error){failed++;notify(`${profile.name}: ${error.message}`);}
+    }
+    await loadProfiles();
+    notify(`Conectar todos: ${connected} conectadas, ${already} ya abiertas, ${skipped} omitidas y ${failed} con error.`);
+  }catch(error){notify(error.message);}
+  finally{connectingAll=false;button.disabled=false;button.textContent='Conectar todos';}
+};
 $('#connection-backup-side').onclick = () => { show('connections'); loadProfiles(); };
 let connectionBackupMode = null;
 function openConnectionBackup(mode) {
@@ -566,8 +585,7 @@ profileForm.onsubmit = async event => {
 };
 
 async function requestRemote(profile) {
-  if(!resultsGrid.confirmDiscard())return;
-  if (busy || !profile || $('#credentials-dialog').open) return;
+  if (busy || connectingAll || !profile || $('#credentials-dialog').open) return;
   if (!supportedEngines.includes(profile.engine)) return notify('Este motor todavía no tiene driver integrado.');
   try {
     const overview = await api.connectionOverview();
@@ -592,11 +610,10 @@ async function connectSavedOrPrompt(profile, resumeTab=null) {
   return false;
 }
 async function finishRemoteConnection(id, data, resumeTab=null) {
-  const resume=tabs.find(tab=>tab.id===(resumeTab||activeTab)&&tab.connectionKey===id);
+  const resume=resumeTab?tabs.find(tab=>tab.id===resumeTab&&tab.connectionKey===id):null;
   updateConnection(data);
-  $('#results').replaceChildren(element('div', 'Sesión abierta. Ejecuta una consulta para ver sus resultados.', 'result-placeholder'));
-  $('#query-info').textContent = 'Listo para ejecutar';
-  if(resume){bindQuery(resume,data);await selectTab(resume.id,true);}else newQuery(initialQuery(data.engine));
+  if(resume){bindQuery(resume,data);await selectTab(resume.id,true);}
+  await loadProfiles();
   notify(`Conectado a ${data.name}${data.warning ? '. ' + data.warning : ''}`);
 }
 async function openCredentials(profile,resumeTab=null) {
@@ -677,12 +694,11 @@ $('#wrap-results').onchange = () => $('#results').classList.toggle('wrap-values'
 async function ensureSession(key) {
   updateConnection(await api.activateConnection(key));
 }
-async function activateSaved(key) {
-  if(!resultsGrid.confirmDiscard())return;
+async function activateSaved(key,openEditor=false) {
   await task(async () => {
     await ensureSession(key);
-    const tab = [...tabs].reverse().find(item => item.connectionKey === key);
-    if (tab) await selectTab(tab.id, true); else newQuery();
+    if(openEditor){const tab = [...tabs].reverse().find(item => item.connectionKey === key);
+      if (tab) await selectTab(tab.id, true); else newQuery();}
   });
 }
 async function openConnectionObject(key, kind, first, second) {
