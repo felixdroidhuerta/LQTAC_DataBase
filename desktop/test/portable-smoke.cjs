@@ -58,7 +58,7 @@ async function run() {
     assert.equal(await evaluate('document.querySelector("#result-limit option[value=" + CSS.escape("0") + "]")?.textContent'), 'Sin límite');
     assert.equal(await evaluate('document.querySelector(".brand-wordmark-light").naturalWidth > 0'), true);
     assert.equal(await evaluate('document.querySelector("#stop-query")?.disabled'), true);
-    assert.equal(await evaluate('document.querySelectorAll(".editor-caption .tool-group").length'), 4);
+    assert.equal(await evaluate('document.querySelectorAll(".editor-caption .tool-group").length'), 5);
     assert.equal(await evaluate('document.querySelector("#edit-result-data")?.disabled'), true);
     assert.equal(await evaluate('document.querySelector("#apply-result-data")?.disabled'), true);
     assert.equal((await evaluate('window.lqtac.getSettings()')).queryTimeoutSeconds, 30);
