@@ -1,7 +1,7 @@
 const mysql = require('mysql2');
 
 // Local protocol fixture, not a SQL engine. Never contacts a real database.
-async function startMySQLFixture({ denyCancel = false, cancelDelayMs = 0 } = {}) {
+async function startMySQLFixture({ denyCancel = false, cancelDelayMs = 0, comparisonDefinitions = null, comparisonDelayMs = 0 } = {}) {
   const sockets = new Set();
   const handshakes = [];
   const queries = [];
@@ -54,6 +54,21 @@ async function startMySQLFixture({ denyCancel = false, cancelDelayMs = 0 } = {})
     });
     connection.on('query', sql => {
       queries.push(sql);
+      if(comparisonDefinitions){
+        const schema=/= '([^']+)'/.exec(sql)?.[1];
+        const catalog=comparisonDefinitions[schema]||[];
+        if(sql.startsWith('SELECT TRIGGER_NAME AS name')){result(['name','table_schema','table_name'],catalog.filter(o=>o.type==='trigger').map(o=>[o.name,schema,o.table||null]));return;}
+        if(sql.startsWith('SELECT TABLE_NAME AS name')){result(['name'],catalog.filter(o=>o.type==='view').map(o=>[o.name]));return;}
+        if(sql.startsWith('SELECT ROUTINE_NAME AS name')){result(['name','kind'],catalog.filter(o=>['procedure','function'].includes(o.type)).map(o=>[o.name,o.type.toUpperCase()]));return;}
+        const show=/^SHOW CREATE (TRIGGER|VIEW|PROCEDURE|FUNCTION) `([^`]+)`\.`([^`]+)`$/.exec(sql);
+        if(show){const item=comparisonDefinitions[show[2]]?.find(o=>o.type===show[1].toLowerCase()&&o.name===show[3]);
+          const respond=()=>{if(connection.stream.destroyed)return;if(!item||item.error)connection.writeError({code:1142,message:item?.error||'Object not visible'});else result([show[1]==='TRIGGER'?'SQL Original Statement':'Create '+show[1][0]+show[1].slice(1).toLowerCase(),'sql_mode'],[[item.ddl,sqlMode]]);};
+          if(comparisonDelayMs)setTimeout(respond,comparisonDelayMs).unref();else respond();return;
+        }
+      }
+      if(sql.startsWith('SELECT TRIGGER_NAME AS name')){result(['name','table_schema','table_name'],sql.includes("= 'test'")?[...triggers.values()].map(t=>[t.name,'test',t.table]):[]);return;}
+      if(sql.startsWith('SELECT TABLE_NAME AS name')){result(['name'],sql.includes("= 'test'")?[...definitions.keys()].filter(k=>k.startsWith('view:')).map(k=>[k.slice(5)]):[]);return;}
+      if(sql.startsWith('SELECT ROUTINE_NAME AS name')){result(['name','kind'],sql.includes("= 'test'")?[...definitions.keys()].filter(k=>!k.startsWith('view:')).map(k=>[k.split(':')[1],k.split(':')[0].toUpperCase()]):[]);return;}
       if (/^KILL QUERY \d+$/.test(sql)) {
         if (denyCancel) { connection.writeError({ code: 1227, message: 'Fixture cancellation denied' }); return; }
         const target = byId.get(Number(sql.slice(11)));
@@ -129,6 +144,6 @@ async function startMySQLFixture({ denyCancel = false, cancelDelayMs = 0 } = {})
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const profile = { name: 'Servidor de prueba', engine: 'mysql', host: '127.0.0.1', port: server._server.address().port, username: 'fixture', database: 'test' };
-  return { profile, handshakes, queries, allowCancellation: () => { denyCancel = false; }, changeDefinition: () => { revision++; }, simulateInsert: () => { autoIncrement++; }, close: () => new Promise(resolve => { for (const socket of sockets) socket.stream.destroy(); server.close(resolve); }) };
+  return { profile, handshakes, queries, setTriggerBody:(name,body)=>{triggers.get(name).body=body;},setObjectDefinition:(type,name,ddl)=>definitions.set(type+':'+name,ddl),allowCancellation: () => { denyCancel = false; }, changeDefinition: () => { revision++; }, simulateInsert: () => { autoIncrement++; }, close: () => new Promise(resolve => { for (const socket of sockets) socket.stream.destroy(); server.close(resolve); }) };
 }
 module.exports = { startMySQLFixture };

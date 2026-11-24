@@ -1,6 +1,6 @@
-# LQTAC dbFox 0.2.6 - Manual de usuario
+# LQTAC dbFox 0.2.7 - Manual de usuario
 
-Actualizado: 23 de noviembre de 2026.
+Actualizado: 24 de noviembre de 2026.
 Capturas reales con datos ficticios y servidores de prueba locales.
 
 ## Abrir y empezar a trabajar
@@ -192,21 +192,17 @@ Pulsa una cabecera para alternar ascendente, descendente y orden original. Al fi
 
 Distingue la fila activa de la celda elegida y recupera el valor completo cuando lo necesites.
 
-### Copiar una celda o una fila
+### Copiar o pegar una celda
 
-Selecciona la celda: la fila queda marcada y la celda recibe un resaltado distinto. Ctrl+C copia su contenido; Ctrl+Mayús+C copia la fila. También puedes usar el botón de copiar o el menú contextual.
+Un clic selecciona la celda. Ctrl+C copia su contenido completo; Ctrl+V pega texto, saltos de línea y tabuladores en esa misma celda, sin abrir el editor. El pegado respeta los campos de solo lectura y queda pendiente de Aplicar cambios.
 
-### Contenido extenso
+### Copiar filas y exportar
 
-Botón derecho > Ver contenido completo abre un visor con el valor íntegro. En modo de lectura, Enter o doble clic también permite verlo. Es útil para consultas guardadas en una columna de texto. Copiar contenido usa ese texto completo.
+El menú contextual permite copiar filas seleccionadas, con o sin encabezados y distintos separadores. Pegar filas es una acción independiente de pegar en una celda. CSV y XLSX exportan los resultados cargados, filtrados y ordenados.
 
-### CSV y Excel
+### Ajustar columnas
 
-Usa Exportar CSV o Exportar XLSX para guardar el resultado activo. La exportación respeta las filas del resultado filtrado y su orden. Si tienes varias salidas, comprueba cuál está seleccionada. Guardar un .sql guarda el código, no los datos.
-
-### Cambios sin aplicar
-
-La exportación se desactiva mientras hay ediciones pendientes. Aplica o descarta primero. Los formatos exportados pueden ser más fáciles de manejar que una cuadrícula muy grande; XLSX también tiene límites para el contenido de una celda.
+Arrastra el borde derecho de una cabecera para ampliar o reducir la columna. Doble clic restablece su ancho. El ajuste se conserva al ordenar, filtrar y volver a esa respuesta durante la sesión.
 
 ## Modificar registros y aplicar
 
@@ -586,6 +582,66 @@ Extrae el ZIP nuevo en otra carpeta. Cierra las dos versiones y copia tu carpeta
 ### Primera apertura y comprobación
 
 Abre LQTAC dbFox.exe desde la carpeta completa. Revisa tus conexiones, consultas y dashboards. Las contraseñas guardadas pueden requerir introducirse de nuevo en otro equipo o cuenta.
+
+## Comparar triggers, vistas y rutinas
+
+El botón de flechas opuestas abre el comparador MySQL/MariaDB.
+
+![Captura de Comparar triggers, vistas y rutinas](assets/30-comparador.png)
+
+Comparación real con servidores de prueba locales y definiciones ficticias.
+
+### Seleccionar A y B
+
+Conecta los servidores y elige servidor y base en cada lado. También puedes comparar dos bases del mismo servidor. Pulsa Comparar: se cargan los objetos visibles para tus usuarios sin cambiar la base activa de las consultas.
+
+### Localizar diferencias
+
+El listado agrupa triggers, vistas, procedimientos y funciones: Igual, Modificado, Solo en A/B o No se pudo leer. Filtra por nombre, tipo, estado o tabla del trigger. El filtro de tabla busca en ambos lados y la cabecera indica la tabla de A y B.
+
+### Revisar el código
+
+Los paneles resaltan líneas y fragmentos cambiados; las flechas saltan entre diferencias. Puedes ignorar espacios, DEFINER, nombres de base o comentarios. El código original sigue visible. Exportar informe guarda una captura JSON de la comparación.
+
+## Editar o tomar código del otro lado
+
+Prepara un borrador y confirma el SQL antes de cambiar el destino.
+
+![Captura de Editar o tomar código del otro lado](assets/31-editar-comparacion.png)
+
+Editor de un trigger con destino identificado y revisión SQL antes de aplicar.
+
+### Escribir o copiar como borrador
+
+Editar permite modificar manualmente el objeto de ese lado. B → A prepara en A un borrador a partir de B; A → B hace lo contrario. Puedes seguir editándolo. En triggers se copia el cuerpo y se conservan inicialmente el momento y evento de destino.
+
+### Conservar la identidad de destino
+
+Se mantienen el nombre, la tabla del trigger y el DEFINER de destino. En vistas y rutinas se adapta la cabecera, conservando las referencias del cuerpo para revisión manual. Comprueba el servidor, las bases citadas y los permisos.
+
+### Revisar y aplicar
+
+Revisar SQL no escribe. Aplicar verifica que el objeto no haya cambiado, guarda una copia original e intenta restaurarla si falla la recreación. DROP + CREATE no es atómico. Los cambios correctos se reflejan en la comparación; si el resultado es incierto, verifica antes de reintentar.
+
+## Identificar la modificación que falla
+
+Los errores permanecen en una ventana con el contexto de la operación.
+
+![Captura de Identificar la modificación que falla](assets/32-avisos-edicion.png)
+
+Dos valores inválidos identificados por consulta, respuesta, clave, campo y valores.
+
+### Qué información muestra
+
+Consulta, respuesta, servidor y tabla; fila del resultado, clave del registro, campo y tipo, valor original y propuesto. Distingue errores de validación de rechazos del servidor, muestra el SQL asociado cuando existe e indica cuántas filas llegaron a aplicarse.
+
+### Corregir sin perder el borrador
+
+Ir a celda localiza el campo aunque esté en otra página. Si el filtro oculta la fila, lo limpia para mostrarla. Corrige el valor y vuelve a revisar. La validación previa no envía cambios al servidor; los cambios restantes se conservan pendientes.
+
+### Compartir los detalles
+
+Copiar detalles reúne el diagnóstico y el SQL asociado, sin copiar todas las filas de la respuesta. Si se informa de un resultado incierto o de que hay que volver a consultar, comprueba la tabla antes de repetir escrituras.
 
 ## Conectar mediante SSH o socket local
 

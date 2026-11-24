@@ -17,6 +17,7 @@ import {initSQLToolbar} from './sql-toolbar.js';
 import {initSQLFavorites} from './sql-favorites.js';
 import {initLineNumbers} from './line-numbers.js';
 import {initDashboard} from './dashboard.js';
+import {initSchemaCompare} from './schema-compare.js';
 
 const $ = selector => document.querySelector(selector);
 const api = window.lqtac;
@@ -50,10 +51,11 @@ const autocomplete = attachAutocomplete($('#query'), $('#table-completions'), ()
 const sqlHighlight = attachSQLHighlight($('#query'));
 initSQLFind($('#query'));
 const outputs = initOutputs({api,notify});
-const resultsGrid=initResultsGrid({api,notify,runTask:action=>task(action),onStatus:status=>updateConnection(status)});
+const resultsGrid=initResultsGrid({api,notify,runTask:action=>task(action),onStatus:status=>updateConnection(status),getQueryContext:()=>{const tab=tabs.find(t=>t.id===activeTab);return {name:tab?.title,sql:tab?.sql,connection:tab?.connectionName};}});
 const queryTools = initQueryTools({api,getConnection:()=>connection,runSelection:()=>run(true),runTask:action=>task(action),notify,isBusy:()=>busy,getExportRows:()=>resultsGrid.exportRows(),hasPendingEdits:()=>resultsGrid.hasChanges()});
 const dashboard=initDashboard({api,notify,show,getOpenQueries:async()=>{const snapshots=await api.dashboardQueries(tabs.map(t=>t.id));return tabs.map(t=>({...t,snapshot:snapshots.find(s=>s.id===t.id)}));},getConnection:()=>connection,getResults:()=>{const result=resultsGrid.dashboardResults(),tab=tabs.find(t=>t.id===activeTab);if(result&&tab)result.results.forEach((r,i)=>r.label=tab.title+(r.customLabel?' · '+r.label:result.results.length>1?' · Respuesta '+(i+1):''));return result;}});
 const objectEditor=createObjectEditor({api,runTask:action=>task(action),getConnection:()=>connection,onChange:async()=>{autocomplete.invalidate();updateConnection(await api.catalog());},notify});
+const schemaComparison=initSchemaCompare({api,notify});
 initPanelLayout();
 const defaultSql = '-- Tu primera consulta en LQTAC dbFox\nSELECT * FROM proyectos;';
 let tabs;
@@ -75,6 +77,14 @@ function element(tag, text, className) {
   if (className) node.className = className;
   return node;
 }
+function moduleIcon(module){
+  const icon=element('span',module.id==='connections'?undefined:module.icon,'card-icon');
+  if(module.id==='connections'){
+    const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('width','24');svg.setAttribute('height','24');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','1.6');svg.setAttribute('aria-hidden','true');
+    svg.innerHTML='<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/>';icon.append(svg);
+  }
+  return icon;
+}
 function notify(message) {
   $('#toast').textContent = message;
   $('#toast').classList.remove('hidden');
@@ -90,7 +100,8 @@ function show(view) {
   if (view === 'sql' && !tabs.length) { newQuery(); return; }
   for (const section of document.querySelectorAll('.view')) section.classList.toggle('hidden', section.id !== view);
   for (const button of document.querySelectorAll('[data-view]')) button.classList.toggle('active', button.dataset.view === (view==='dashboard-library'?'dashboard':view));
-  $('#breadcrumb').textContent = { home: 'Inicio', connections: 'Conexiones', sql: 'Editor SQL', modules: 'Módulos', dashboard:'Dashboards', 'dashboard-library':'Biblioteca de dashboards', 'table-designer': 'Estructura de tabla' }[view];
+  $('#breadcrumb').textContent = { home: 'Inicio', connections: 'Conexiones', sql: 'Editor SQL', modules: 'Módulos', dashboard:'Dashboards', 'dashboard-library':'Biblioteca de dashboards', 'table-designer': 'Estructura de tabla','schema-compare':'Comparar bases de datos' }[view];
+  if(view==='schema-compare')schemaComparison.activate();
   $('#designer-tab').classList.toggle('active', view === 'table-designer');
   if(view==='dashboard')dashboard.activateEditor();if(view==='dashboard-library')dashboard.deactivateEditor();
   if (view === 'connections') loadProfiles();
@@ -363,14 +374,14 @@ async function run(selectionOnly=false,all=false) {
   });
 }
 
-for (const module of modules) {
+for (const module of [...modules,{id:'schema-compare',icon:'⇆',title:'Comparar bases de datos',description:'Diferencias de triggers, vistas, procedimientos y funciones entre MySQL y MariaDB.',status:'Disponible',action:'schema-compare'}]) {
   const card = element('button', undefined, `card${module.action ? ' available' : ''}`);
-  card.append(element('span', module.icon, 'card-icon'), element('h3', module.title), element('p', module.description), element('span', module.status, 'pill'));
+  card.append(moduleIcon(module), element('h3', module.title), element('p', module.description), element('span', module.status, 'pill'));
   card.onclick = () => module.action==='dashboard'?dashboard.open():show(module.action ?? 'modules');
   $('#module-cards').append(card);
   const row = element('article', undefined, 'module-row');
   const copy = element('div'); copy.append(element('h3', module.title), element('p', module.description));
-  row.append(element('span', module.icon, 'card-icon'), copy, element('span', module.status, 'pill'));
+  row.append(moduleIcon(module), copy, element('span', module.status, 'pill'));
   $('#module-list').append(row);
 }
 for (const button of document.querySelectorAll('[data-view]')) button.addEventListener('click', () => {if(button.dataset.view!=='dashboard')show(button.dataset.view);});
@@ -463,7 +474,7 @@ async function loadProfiles() {
       edit.onclick = () => editProfile(profile);
       const supported = supportedEngines.includes(profile.engine);
       const connected = overview.sessions.some(state => state.profileId === profile.id && state.connected);
-      row.append(element('span', '⇄', 'card-icon'), copy, element('span', connected ? 'Conectado' : supported ? 'Sin conectar' : 'Driver pendiente', 'pill'), edit);
+      row.append(moduleIcon({id:'connections'}), copy, element('span', connected ? 'Conectado' : supported ? 'Sin conectar' : 'Driver pendiente', 'pill'), edit);
       if (supported) {
         const button = element('button', connected ? 'Abrir editor' : 'Conectar', 'primary');
         button.onclick = () => connected ? activateSaved(profile.id,true) : requestRemote(profile);

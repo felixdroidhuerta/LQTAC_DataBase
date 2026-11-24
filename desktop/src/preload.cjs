@@ -1,5 +1,12 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('lqtac', Object.freeze({
+  readComparison: request => ipcRenderer.invoke('compare:read',request),
+  cancelComparison: runId => ipcRenderer.invoke('compare:cancel',runId),
+  exportComparison: report => ipcRenderer.invoke('compare:export',report),
+  openComparisonEdit: request => ipcRenderer.invoke('compare:edit-open',request),
+  previewComparisonEdit: request => ipcRenderer.invoke('compare:edit-preview',request),
+  applyComparisonEdit: request => ipcRenderer.invoke('compare:edit-apply',request),
+  closeComparisonEdit: token => ipcRenderer.invoke('compare:edit-close',token),
   checkDashboardQuery: (sql,engine) => ipcRenderer.invoke('dashboards:query-check',sql,engine),
   exportDashboard: request => ipcRenderer.invoke('dashboards:export',request),
   prepareDashboardImport: () => ipcRenderer.invoke('dashboards:import-prepare'),

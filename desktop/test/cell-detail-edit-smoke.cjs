@@ -20,13 +20,13 @@ app.whenReady().then(async()=>{
   database.run("CREATE TABLE edits(id INTEGER PRIMARY KEY,value TEXT);INSERT INTO edits VALUES(1,'original'),(2,'second')");
   await js(`(()=>{const query=document.querySelector('#query');query.value='SELECT * FROM main.edits';query.setSelectionRange(0,0);query.dispatchEvent(new Event('input'));document.querySelector('#run-query').click()})()`);
   await until(`!!document.querySelector('#results tbody td')&&!document.querySelector('#run-query').disabled`);
-  await js(`(()=>{const rows=document.querySelectorAll('#results tbody tr');rows[0].cells[1].click();rows[1].cells[1].dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));document.querySelector('#delete-result-row').click()})()`);
+  await js(`(()=>{const rows=document.querySelectorAll('#results tbody tr');rows[0].cells[2].click();rows[1].cells[2].dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));document.querySelector('#delete-result-row').click()})()`);
   await until(`!!document.querySelector('.data-change-sql-dialog[open]')`);
   assert.match(await js(`document.querySelector('.data-change-status').textContent`),/2 filas/);
   assert.equal(database.exec('SELECT COUNT(*) FROM edits')[0].values[0][0],2);
   await js(`document.querySelector('.data-change-sql-dialog[open] .secondary').click()`);
   await until(`!document.querySelector('#delete-result-row').disabled`);
-  await js(`(()=>{document.querySelector('#results tbody tr td:nth-child(2)').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:300,clientY:300}));[...document.querySelectorAll('.cell-copy-menu:not([hidden]) button')].find(b=>b.textContent==='Ver contenido completo').click()})()`);
+  await js(`(()=>{document.querySelector('#results tbody tr td:nth-child(3)').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:300,clientY:300}));[...document.querySelectorAll('.cell-copy-menu:not([hidden]) button')].find(b=>b.textContent==='Ver contenido completo').click()})()`);
   await until(`!!document.querySelector('.cell-detail-dialog[open]')`);
   await js(`[...document.querySelectorAll('.cell-detail-dialog[open] button')].find(b=>b.textContent==='Editar contenido').click();void 0`);
   await until(`document.querySelector('.cell-detail-dialog[open] textarea')?.readOnly===false`);
@@ -44,7 +44,7 @@ app.whenReady().then(async()=>{
   await js(`document.querySelector('#confirm-result-changes').click()`);
   await until(`document.querySelectorAll('.data-cell-dirty').length===0`);
   assert.equal(database.exec('SELECT value FROM edits')[0].values[0][0],'Long text\nSecond line');
-  await js(`(()=>{const rows=document.querySelectorAll('#results tbody tr');rows[0].cells[1].click();rows[1].cells[1].dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));document.querySelector('#delete-result-row').click()})()`);
+  await js(`(()=>{const rows=document.querySelectorAll('#results tbody tr');rows[0].cells[2].click();rows[1].cells[2].dispatchEvent(new MouseEvent('click',{bubbles:true,ctrlKey:true}));document.querySelector('#delete-result-row').click()})()`);
   await until(`!!document.querySelector('.data-change-sql-dialog[open]')`);
   assert.equal(database.exec('SELECT COUNT(*) FROM edits')[0].values[0][0],2);
   assert.match(await js(`document.querySelector('.data-change-status').textContent`),/2 filas/);

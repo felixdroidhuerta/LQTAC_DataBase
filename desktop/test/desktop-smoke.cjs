@@ -150,7 +150,7 @@ app.whenReady().then(async () => {
       }; poll();
     })`);
     assert.equal(await js('document.querySelectorAll("#results tbody tr").length'), 3);
-    assert.equal(await js('document.querySelector("#results tbody tr td:nth-child(2)").textContent'), 'LQTAC Data Base');
+    assert.equal(await js('document.querySelector("#results tbody tr td:nth-child(3)").textContent'), 'LQTAC Data Base');
     assert.equal(await js('document.querySelectorAll(".connection-entry[data-connection-id=local] .tree-object").length'), 2);
     assert.equal(await js('Boolean(window.lqtac) && typeof window.require === "undefined"'), true);
     await js(`(() => {
@@ -196,7 +196,7 @@ app.whenReady().then(async () => {
     assert.equal(gridMetrics.noPageOverflow, true);
     await js(`document.querySelector('#wrap-results').click()`);
     assert.equal(await js('getComputedStyle(document.querySelector("#results .cell-value")).whiteSpace'), 'pre-wrap');
-    assert.equal(await js('getComputedStyle(document.querySelector("#results th")).whiteSpace'), 'nowrap');
+    assert.equal(await js('getComputedStyle(document.querySelector("#results thead th:nth-child(2)")).whiteSpace'), 'nowrap');
     assert.ok(await js('document.querySelector("#results tbody tr").getBoundingClientRect().height > 45'));
     await js(`document.querySelector('#wrap-results').click()`);
     window.setSize(1000, 680);

@@ -72,7 +72,12 @@ async function describe(adapter,engine,target,signal){
 }
 function normalize(value,column,engine){
   if(value===null){if(!column.nullable)throw new Error(`${column.name} no admite NULL.`);return null;}
-  if(typeof value!=='string'||value.length>1000000)throw new Error('El valor de la celda no es válido.');
+  if(typeof value==='number'){
+    if(!Number.isFinite(value)||Number.isInteger(value)&&!Number.isSafeInteger(value))throw Error('El número no se puede representar con seguridad. Introduce el valor como texto.');
+    value=String(value);
+  }
+  if(typeof value!=='string')throw new Error(`Tipo de valor no admitido: ${typeof value}. Se esperaba texto, un número o NULL.`);
+  if(value.length>1000000)throw new Error('El contenido supera el máximo de un millón de caracteres por celda.');
   if(column.nullable&&(value===''||value.trim().toUpperCase()==='NULL'))return null;
   const type=column.type.toLowerCase();
   const numeric=/^(?:tinyint|smallint|mediumint|int|integer|bigint|smallserial|serial|bigserial|decimal|numeric|real|float|double)\b/.test(type);
@@ -90,6 +95,20 @@ function normalize(value,column,engine){
   }
   return value;
 }
+const diagnosticValue=value=>typeof value==='string'&&value.length>4000?value.slice(0,4000)+`… [valor recortado: ${value.length} caracteres]`:value;
+function editIssue(item,row,column,value,reason,operation='update'){
+ return {operation,rowIndex:row,rowNumber:row+1,target:`${item.target.schema}.${item.target.table}`,keys:item.primary.map(i=>({name:item.columns[i].name,value:diagnosticValue(item.rows[row]?.[i])})),fields:column===null?[]:[{columnIndex:column,name:item.columns[column]?.name||String(column),type:item.columns[column]?.type,oldValue:diagnosticValue(item.rows[row]?.[column]),newValue:diagnosticValue(value)}],reason};
+}
+function validateEditValues(item,request){
+ const issues=[];let total=0;
+ const check=(row,column,value,operation)=>{if(!item.columns[column])return;try{normalize(value,item.columns[column],item.engine);}catch(error){total++;if(issues.length<100)issues.push(editIssue(item,row,column,value,error.message,operation));}};
+ for(const change of request.changes||[])if(change&&Number.isInteger(change.row)&&item.rows[change.row]&&Number.isInteger(change.column))check(change.row,change.column,change.value,'update');
+ for(const insert of request.inserts||[])if(insert&&Number.isInteger(insert.row)&&Array.isArray(insert.values)){
+  for(const value of insert.values)if(value&&Number.isInteger(value.column))check(insert.row,value.column,value.value,'insert');
+  for(const column of item.primary)if(!insert.values.some(v=>v?.column===column)&&!item.columns[column].auto&&(item.columns[column].defaultValue==null||['mysql','mariadb'].includes(item.engine))){total++;if(issues.length<100)issues.push(editIssue(item,insert.row,column,undefined,`Indica la clave ${item.columns[column].name} para la fila nueva.`,'insert'));}
+ }
+ if(issues.length){const first=issues[0],field=first.fields[0];const error=Error(`${first.target} · fila ${first.rowNumber} · campo ${field.name}: ${first.reason}`);error.editDiagnostics={phase:'validation',issues,total};throw error;}
+}
 class ResultEdits {
   constructor(){this.sessions=new Map();}
   async open(snapshot,index,adapter,engine,key,signal){
@@ -98,7 +117,7 @@ class ResultEdits {
     const columns=result.columns.map(name=>metadata.columns.find(column=>column.name===name));
     if(columns.some(c=>!c)||new Set(result.columns).size!==result.columns.length||metadata.columns.some(c=>c.primary&&!result.columns.includes(c.name)))throw new Error('El resultado debe incluir los campos y la clave primaria de una única tabla.');
     const unsupported=c=>/blob|binary|bytea|json|xml|interval|geometry|geography|point|polygon|array|\[\]/i.test(c.type);
-    columns.forEach(c=>{c.insertable=!c.generated&&!unsupported(c);c.editable=!c.primary&&c.insertable;});
+    columns.forEach(c=>{c.insertable=!c.generated&&!unsupported(c);c.editable=c.insertable;});
     const primary=columns.map((c,i)=>c.primary?i:-1).filter(i=>i>=0);const seen=new Set();
     for(const row of result.values){const identity=primary.map(i=>row[i]);if(identity.some(v=>v===null||v===undefined||typeof v==='number'&&!Number.isSafeInteger(v)))throw new Error('La clave de una fila no se puede representar con seguridad.');const id=JSON.stringify(identity);if(seen.has(id))throw new Error('Hay claves duplicadas en este resultado.');seen.add(id);}
     const token=randomUUID();for(const [id,item]of this.sessions)if(item.expires<Date.now()||(item.snapshot===snapshot&&item.index===index))this.sessions.delete(id);
@@ -111,37 +130,45 @@ class ResultEdits {
     const changesInput=request.changes||[],deletes=request.deletes||[],inserts=request.inserts||[];
     if(!Array.isArray(changesInput)||!Array.isArray(deletes)||!Array.isArray(inserts)||changesInput.length+deletes.length+inserts.length<1||changesInput.length+deletes.length+inserts.length>10000||Buffer.byteLength(JSON.stringify({changesInput,deletes,inserts}))>8000000)throw new Error('La edición supera el límite permitido.');
     if((await readMetadata(signal=>describe(adapter,item.engine,item.target,signal))).fingerprint!==item.metadata)throw new Error('Cambió la estructura de la tabla. Vuelve a consultarla.');
+    validateEditValues(item,request);
     const groups=new Map();const cells=new Set();
     for(const change of changesInput){const {row,column,value}=change||{};if(!Number.isInteger(row)||!item.rows[row]||!Number.isInteger(column)||!item.columns[column]?.editable)throw new Error('Celda no editable.');const id=`${row}:${column}`;if(cells.has(id))throw new Error('Hay cambios duplicados.');cells.add(id);if(!groups.has(row))groups.set(row,[]);groups.get(row).push({column,value:normalize(value,item.columns[column],item.engine)});}
     if(new Set(deletes).size!==deletes.length||deletes.some(row=>!Number.isInteger(row)||!item.rows[row]||groups.has(row)))throw new Error('Las filas a borrar no son válidas.');
     if(deletes.length&&item.columns.some(c=>!c.insertable&&!c.generated&&!c.primary))throw new Error('Esta tabla contiene campos cuyo contenido no se puede verificar con seguridad antes de borrar. Usa una consulta SQL para borrar esas filas.');
     const insertRows=[],insertIds=new Set();
     for(const insert of inserts){if(!insert||!Number.isInteger(insert.row)||insert.row<item.rows.length||insertIds.has(insert.row)||!Array.isArray(insert.values))throw new Error('La fila nueva no es válida.');insertIds.add(insert.row);const seen=new Set(),values=[];for(const entry of insert.values){if(!Number.isInteger(entry.column)||!item.columns[entry.column]?.insertable||seen.has(entry.column))throw new Error('Campo no válido en la fila nueva.');seen.add(entry.column);values.push({column:entry.column,value:normalize(entry.value,item.columns[entry.column],item.engine)});}for(const i of item.primary)if(!seen.has(i)&&!item.columns[i].auto&&(item.columns[i].defaultValue==null||['mysql','mariadb'].includes(item.engine)))throw new Error(`Indica la clave ${item.columns[i].name} para la fila nueva.`);insertRows.push({row:insert.row,values});}
-    const applied=[],deleted=[],inserted=[];let error,requiresReload=false,completed=0;const total=groups.size+deletes.length+inserts.length;
+    const applied=[],deleted=[],inserted=[];let error,errorDetails,requiresReload=false,completed=0;const total=groups.size+deletes.length+inserts.length;
+    const failure=(problem,row,operation,values=[])=>{
+      const issue=editIssue(item,row,null,null,problem.message,operation);issue.fields=values.map(value=>({columnIndex:value.column,name:item.columns[value.column].name,type:item.columns[value.column].type,oldValue:diagnosticValue(item.rows[row]?.[value.column]),newValue:diagnosticValue(value.value)}));
+      issue.code=problem.code||null;issue.sqlState=problem.sqlState||null;issue.constraint=problem.constraint||null;issue.serverColumn=problem.column||null;
+      try{const one={token:request.token,changes:operation==='update'?values.map(value=>({...value,row})):[],deletes:operation==='delete'?[row]:[],inserts:operation==='insert'?[{row,values}]:[]};issue.sql=problem.sql||this.preview(one,snapshot,adapter,key).statements.join('\n\n');}catch{issue.sql=problem.sql||null;}
+      return {phase:'apply',issues:[issue],total:1};
+    };
     const progress=()=>onProgress({completed:++completed,total});onProgress({completed:0,total});
     for(const [row,changes]of groups){
       try{
         const values=await execute(item,()=>this.write(item,row,changes));
         if(!values)throw new Error(`Conflicto en la fila ${row+1}: fue modificada o eliminada. Vuelve a consultar.`);
         item.rows[row]=structuredClone(values);snapshot.results[item.index].values[row]=values;applied.push({row,values});progress();
-      }catch(problem){error=problem.message;if(['QUERY_TIMEOUT','QUERY_CANCELLED','RESULT_RELOAD_REQUIRED'].includes(problem.code)||adapter.alive===false){requiresReload=true;this.sessions.delete(request.token);}break;}
+      }catch(problem){error=problem.message;errorDetails=failure(problem,row,'update',changes);if(['QUERY_TIMEOUT','QUERY_CANCELLED','RESULT_RELOAD_REQUIRED'].includes(problem.code)||adapter.alive===false){requiresReload=true;this.sessions.delete(request.token);}break;}
     }
     if(!error)for(const row of [...deletes].sort((a,b)=>b-a)){
       try{const ok=await execute(item,()=>this.remove(item,row));if(!ok)throw new Error(`Conflicto en la fila ${row+1}: fue modificada o eliminada. Vuelve a consultar.`);item.rows.splice(row,1);snapshot.results[item.index].values.splice(row,1);deleted.push(row);progress();}
-      catch(problem){error=problem.message;if(['QUERY_TIMEOUT','QUERY_CANCELLED','RESULT_RELOAD_REQUIRED'].includes(problem.code)||adapter.alive===false)requiresReload=true;break;}
+      catch(problem){error=problem.message;errorDetails=failure(problem,row,'delete');if(['QUERY_TIMEOUT','QUERY_CANCELLED','RESULT_RELOAD_REQUIRED'].includes(problem.code)||adapter.alive===false)requiresReload=true;break;}
     }
     if(!error)for(const insert of insertRows){
       try{const values=await execute(item,()=>this.insert(item,insert.values));item.rows.push(structuredClone(values));snapshot.results[item.index].values.push(values);inserted.push({row:insert.row,values});progress();}
-      catch(problem){error=problem.message;if(['QUERY_TIMEOUT','QUERY_CANCELLED','RESULT_RELOAD_REQUIRED'].includes(problem.code)||adapter.alive===false)requiresReload=true;break;}
+      catch(problem){error=problem.message;errorDetails=failure(problem,insert.row,'insert',insert.values);if(['QUERY_TIMEOUT','QUERY_CANCELLED','RESULT_RELOAD_REQUIRED'].includes(problem.code)||adapter.alive===false)requiresReload=true;break;}
     }
     if(error&&(deleted.length||inserted.length))requiresReload=true;
     if(requiresReload)this.sessions.delete(request.token);
-    return {applied,deleted,inserted,error,requiresReload};
+    return {applied,deleted,inserted,error,errorDetails,requiresReload};
   }
   preview(request,snapshot,adapter,key){
     const item=this.sessions.get(request?.token);
     if(!item||item.snapshot!==snapshot||item.adapter!==adapter||item.key!==key||item.expires<Date.now())throw new Error('El resultado ha caducado o cambió su conexión. Vuelve a consultar la tabla.');
     const changesInput=Array.isArray(request.changes)?request.changes:[],deletes=Array.isArray(request.deletes)?request.deletes:[],inserts=Array.isArray(request.inserts)?request.inserts:[];
+    validateEditValues(item,{changes:changesInput,inserts});
     const {engine,target,columns,primary}=item,table=quote(target.schema,engine)+'.'+quote(target.table,engine),names=columns.map(c=>quote(c.name,engine)),statements=[];
     const guards=(row,indices)=>indices.map(i=>`${names[i]}${item.rows[row][i]===null?' IS NULL':' = '+previewLiteral(item.rows[row][i])}`).join(' AND ');
     const grouped=new Map();for(const change of changesInput){if(!Number.isInteger(change?.row)||!item.rows[change.row]||!Number.isInteger(change.column)||!columns[change.column]?.editable)throw new Error('Cambio no válido para la vista previa.');if(!grouped.has(change.row))grouped.set(change.row,[]);grouped.get(change.row).push({...change,value:normalize(change.value,columns[change.column],engine)});}
@@ -177,10 +204,11 @@ class ResultEdits {
   async write(item,row,changes){
     const {engine,adapter,target,columns,primary}=item;const old=item.rows[row];const table=quote(target.schema,engine)+'.'+quote(target.table,engine);const guards=[...new Set([...primary,...changes.map(c=>c.column)])];
     const names=columns.map(c=>quote(c.name,engine));let result;
+    const key=primary.map(i=>{const change=changes.find(c=>c.column===i);return change?change.value:old[i];});
     if(engine==='sqlite'){
       const sql=`UPDATE ${table} SET ${changes.map(c=>names[c.column]+'=?').join(',')} WHERE ${guards.map(i=>names[i]+' IS ?').join(' AND ')}`;
       adapter.database.run(sql,[...changes.map(c=>c.value),...guards.map(i=>old[i])]);if(adapter.database.getRowsModified()!==1)return null;
-      const statement=adapter.database.prepare(`SELECT ${names.join(',')} FROM ${table} WHERE ${primary.map(i=>names[i]+' IS ?').join(' AND ')}`);try{statement.bind(primary.map(i=>old[i]));if(statement.step())return statement.get().map(resultCell);throw Object.assign(new Error('La fila se actualizó pero no se pudo recargar. Vuelve a consultar la tabla.'),{code:'RESULT_RELOAD_REQUIRED'});}finally{statement.free();}
+      const statement=adapter.database.prepare(`SELECT ${names.join(',')} FROM ${table} WHERE ${primary.map(i=>names[i]+' IS ?').join(' AND ')}`);try{statement.bind(key);if(statement.step())return statement.get().map(resultCell);throw Object.assign(new Error('La fila se actualizó pero no se pudo recargar. Vuelve a consultar la tabla.'),{code:'RESULT_RELOAD_REQUIRED'});}finally{statement.free();}
     }
     if(engine==='postgresql'){
       const params=[];const param=value=>{params.push(value);return '$'+params.length;};
@@ -190,7 +218,7 @@ class ResultEdits {
     const compare=(i,value)=>{const text=/char|text|enum|set/i.test(columns[i].type);return text?`BINARY CONVERT(${names[i]} USING utf8mb4) <=> BINARY ${literal(value)}`:`${names[i]} <=> ${literal(value)}`;};
     const sql=`UPDATE ${table} SET ${changes.map(c=>names[c.column]+'='+literal(c.value)).join(',')} WHERE ${guards.map(i=>compare(i,old[i])).join(' AND ')}`;
     const [info]=await adapter.connection.promise().query(sql);if(info.affectedRows!==1)return null;
-    let rows;try{[rows]=await adapter.connection.promise().query(`SELECT ${names.join(',')} FROM ${table} WHERE ${primary.map(i=>compare(i,old[i])).join(' AND ')}`);}catch(problem){throw Object.assign(new Error('La fila se actualizó pero no se pudo recargar. Vuelve a consultar la tabla. '+problem.message),{code:'RESULT_RELOAD_REQUIRED'});}
+    let rows;try{[rows]=await adapter.connection.promise().query(`SELECT ${names.join(',')} FROM ${table} WHERE ${primary.map((i,n)=>compare(i,key[n])).join(' AND ')}`);}catch(problem){throw Object.assign(new Error('La fila se actualizó pero no se pudo recargar. Vuelve a consultar la tabla. '+problem.message),{code:'RESULT_RELOAD_REQUIRED'});}
     if(!rows[0])throw Object.assign(new Error('La fila se actualizó pero no se pudo recargar. Vuelve a consultar la tabla.'),{code:'RESULT_RELOAD_REQUIRED'});return rows[0].map(resultCell);
   }
 }

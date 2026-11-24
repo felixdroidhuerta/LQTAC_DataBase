@@ -1,6 +1,7 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, session, clipboard, safeStorage, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
+const applicationVersion=app.isPackaged?app.getVersion():require('../package.json').version;
 // Configure Chromium storage before ready so the entire workspace travels with the portable folder.
 if (app.isPackaged && require('node:fs').existsSync(path.join(path.dirname(process.execPath), 'portable.json'))) {
   const portableData = path.join(path.dirname(process.execPath), 'Data');
@@ -19,6 +20,8 @@ const { pathToFileURL } = require('node:url');
 const { SQLiteAdapter } = require('./adapters/sqlite.cjs');
 const { ConnectionStore } = require('./connections.cjs');
 const { CredentialStore } = require('./credentials.cjs');
+const {readDefinitions}=require('./schema-compare.cjs');
+const {inspectComparisonObject,checkComparisonSnapshot,definitionForDestination,buildComparisonPlan,comparisonSnapshot}=require('./comparison-edit.cjs');
 const fullBackup = require('./full-backup.cjs');
 const { encryptPackage, decryptPackage, restorePackage, MAX_BYTES: MAX_CONNECTION_BACKUP } = require('./connection-transfer.cjs');
 const { MySQLAdapter } = require('./adapters/mysql.cjs');
@@ -182,7 +185,7 @@ app.whenReady().then(() => {
       execute:(_sql,{signal})=>resultEdits.open(snapshot,index,source,engine,key,signal)
     });
   }));
-  register('results:edit-preview',request=>exclusive(async()=>{const snapshot=resultEdits.sessions.get(request?.token)?.snapshot;if(!snapshot||snapshotFor(snapshot.token)!==snapshot)throw Error('El resultado ha caducado. Ejecuta de nuevo la consulta.');return resultEdits.preview(request,snapshot,adapter,currentProfileId||'local');}));
+  register('results:edit-preview',request=>exclusive(async()=>{const snapshot=resultEdits.sessions.get(request?.token)?.snapshot;if(!snapshot||snapshotFor(snapshot.token)!==snapshot)throw Error('El resultado ha caducado. Ejecuta de nuevo la consulta.');try{return resultEdits.preview(request,snapshot,adapter,currentProfileId||'local');}catch(error){if(error.editDiagnostics)return {error:error.message,diagnostics:error.editDiagnostics};throw error;}}));
   register('results:edit-apply',request=>exclusive(async()=>{
     const source=adapter,engine=currentEngine,key=currentProfileId||'local',runId='data-edit:'+randomUUID(),timeoutMs=settings.get().queryTimeoutSeconds*1000;
     const snapshot=resultEdits.sessions.get(request?.token)?.snapshot;if(!snapshot||snapshotFor(snapshot.token)!==snapshot)throw Error('El resultado ha caducado. Ejecuta de nuevo la consulta.');
@@ -202,10 +205,10 @@ app.whenReady().then(() => {
   }));
   register('settings:get', () => settings.get());
   register('settings:fonts', () => listSystemFonts());
-  register('app:info', () => ({ version: app.getVersion(), manualVersion: '0.2.6' }));
+  register('app:info', () => ({ version: applicationVersion, manualVersion: applicationVersion }));
   register('app:manual', async () => {
     const portable = require('node:fs').existsSync(path.join(path.dirname(process.execPath), 'portable.json'));
-    const file = portable ? path.join(path.dirname(process.execPath), 'Manual-de-usuario-0.2.6.pdf') : path.resolve(__dirname, '../../output/pdf/LQTAC_dbFox_Manual_de_usuario_0.2.6.pdf');
+    const file = portable ? path.join(path.dirname(process.execPath), `Manual-de-usuario-${applicationVersion}.pdf`) : path.resolve(__dirname, `../../output/pdf/LQTAC_dbFox_Manual_de_usuario_${applicationVersion}.pdf`);
     try { await fs.access(file); } catch { throw Error('No se encuentra el manual de usuario en esta instalación.'); }
     const error = await shell.openPath(file);
     if (error) throw Error('No se pudo abrir el manual: ' + error);
@@ -228,6 +231,87 @@ app.whenReady().then(() => {
   };
   const connections = new ConnectionStore(app.getPath('userData'));
   const credentials = new CredentialStore(app.getPath('userData'), safeStorage);
+  const comparisons=new Map();
+  register('compare:read',async request=>{
+    if(!request||typeof request.runId!=='string'||request.runId.length>100||comparisons.has(request.runId)||comparisons.size>=2)throw Error('Espera a que termine la comparación actual.');
+    if(typeof request.schema!=='string'||!request.schema||request.schema.length>64)throw Error('Selecciona una base válida.');
+    rememberActive();const source=sessions.get(request.key);
+    if(!source?.adapter?.alive||!['mysql','mariadb'].includes(source.engine))throw Error('Conecta una sesión MySQL o MariaDB para comparar.');
+    if(!source.schemas.some(item=>item.name===request.schema))throw Error('La base no está en el catálogo visible de esa conexión.');
+    const job={worker:null,cancelled:false};comparisons.set(request.runId,job);let timer;
+    try{
+      const operation=(async()=>{
+        job.worker=await controlFor(source.adapter)();
+        if(job.cancelled){job.worker.close();throw Error('Comparación cancelada.');}
+        return readDefinitions(job.worker,request.schema,{timeoutSeconds:settings.get().queryTimeoutSeconds});
+      })();
+      const result=await Promise.race([operation,new Promise((_,reject)=>{job.reject=reject;timer=setTimeout(()=>{job.cancelled=true;job.timedOut=true;job.worker?.close();reject(Error('Agotado tiempo máximo de comparación.'));},settings.get().queryTimeoutSeconds*1000);})]);
+      if(job.cancelled)throw Error('Comparación cancelada.');
+      return {...result,key:request.key,connection:source.name,engine:source.engine};
+    }catch(error){if(job.timedOut)throw Error('Agotado tiempo máximo de comparación.');if(job.cancelled)throw Error('Comparación cancelada.');throw error;}
+    finally{clearTimeout(timer);job.worker?.close();comparisons.delete(request.runId);}
+  });
+  register('compare:cancel',runId=>{const job=comparisons.get(runId);if(job){job.cancelled=true;job.reject?.(Error('Comparación cancelada.'));job.worker?.close();}return !!job;});
+  register('compare:export',async report=>{
+    if(typeof report!=='string'||Buffer.byteLength(report)>64*1024*1024)throw Error('El informe supera el tamaño permitido.');
+    const chosen=await dialog.showSaveDialog(window,{title:'Exportar comparación',defaultPath:'dbFox-comparacion.json',filters:[{name:'Informe JSON',extensions:['json']}]});
+    if(chosen.canceled)return false;await fs.writeFile(chosen.filePath,report,{mode:0o600});return true;
+  });
+  const comparisonEdits=new Map();let comparisonEditPending=false;
+  async function comparisonEditAction(action){if(comparisonEditPending)throw Error('Espera a que termine la edición actual.');comparisonEditPending=true;try{return await action();}finally{comparisonEditPending=false;}}
+  function comparisonTarget(request){
+    if(!request||!['trigger','view','procedure','function'].includes(request.type))throw Error('Selecciona un trigger, vista, procedimiento o función existente.');
+    identifier(request.schema);identifier(request.name);rememberActive();const source=sessions.get(request.key);
+    if(!source?.adapter?.alive||!['mysql','mariadb'].includes(source.engine)||!source.schemas.some(s=>s.name===request.schema))throw Error('La conexión de destino está cerrada o la base ya no es visible.');
+    return {...request,session:source.adapter,engine:source.engine,connection:source.name};
+  }
+  function comparisonContext(token){const context=comparisonEdits.get(token);if(!context||context.expires<Date.now())throw Error('La edición ha caducado. Vuelve a abrir el objeto.');const target=comparisonTarget(context.target);if(target.session!==context.target.session)throw Error('La sesión de destino ha cambiado. Vuelve a abrir el objeto.');return context;}
+  async function comparisonWorker(target,action,{bounded=true,charset}={}){
+    const auth=authentication.get(target.session);if(!auth)throw Error('Reconecta el servidor de destino.');let worker,timer,expired=false;
+    const work=(async()=>{worker=await drivers[target.engine].open({...auth.profile,database:target.schema},auth.password,{charset:charset||undefined});if(expired){worker.close();throw Error('Agotado tiempo máximo de edición.');}
+      const execute=worker.execute.bind(worker);worker.execute=sql=>execute(sql,{timeoutMs:settings.get().queryTimeoutSeconds*1000});return action(worker);})();
+    try{return await (bounded?Promise.race([work,new Promise((_,reject)=>{timer=setTimeout(()=>{expired=true;worker?.close();reject(Error('Agotado tiempo máximo de preparación de edición.'));},settings.get().queryTimeoutSeconds*1000);})]):work);}
+    finally{clearTimeout(timer);worker?.close();}
+  }
+  async function comparisonRead(worker,action){let timer;try{return await Promise.race([action(),new Promise((_,reject)=>{timer=setTimeout(()=>{worker.close();reject(Error('Agotado tiempo máximo de comprobación.'));},settings.get().queryTimeoutSeconds*1000);})]);}finally{clearTimeout(timer);}}
+  register('compare:edit-open',request=>comparisonEditAction(async()=>{
+    const target=comparisonTarget(request.target),original=await comparisonWorker(target,w=>inspectComparisonObject(w,target.engine,target));checkComparisonSnapshot(original,request.target.expectedDDL);
+    let text=original.type==='trigger'?original.body:original.ddl;
+    if(request.source){const source=comparisonTarget(request.source),object=await comparisonWorker(source,w=>inspectComparisonObject(w,source.engine,source));checkComparisonSnapshot(object,request.source.expectedDDL);text=definitionForDestination(object,original);}
+    for(const [id,saved]of comparisonEdits)if(saved.expires<Date.now())comparisonEdits.delete(id);if(comparisonEdits.size>=20)comparisonEdits.delete(comparisonEdits.keys().next().value);
+    const token=randomUUID();comparisonEdits.set(token,{target,original,expires:Date.now()+600000,plan:null});
+    return {token,target:{key:target.key,schema:target.schema,name:target.name,type:target.type,connection:target.connection,table:original.table||null},text,timing:original.timing,event:original.event,definer:original.definer,fromOther:!!request.source};
+  }));
+  register('compare:edit-preview',request=>comparisonEditAction(async()=>{
+    const context=comparisonContext(request?.token);context.plan=null;
+    const plan=await comparisonWorker(context.target,async worker=>{
+      const latest=await inspectComparisonObject(worker,context.target.engine,context.target);if(latest.version!==context.original.version)throw Error('El objeto ha cambiado desde que abriste el editor. Cierra y vuelve a comparar.');
+      const plan=buildComparisonPlan(context.original,request);
+      if(context.original.type==='trigger'||plan.drop)await canRestoreDefiner(worker,context.original);
+      if(plan.drop){plan.grants=await routineGrants(worker,context.original);if(plan.grants===null)plan.warnings.push('No se han podido leer todos los permisos específicos. Revisa los permisos de la rutina tras aplicar.');else if(plan.grants.length)plan.sql+=';\n\n'+plan.grants.join(';\n')+';';}
+      return plan;
+    });
+    const reviewToken=randomUUID();context.plan={...plan,reviewToken};return {reviewToken,sql:plan.sql,warnings:plan.warnings};
+  }));
+  register('compare:edit-apply',request=>comparisonEditAction(async()=>{
+    const context=comparisonContext(request?.token),plan=context.plan;if(!plan||plan.reviewToken!==request.reviewToken)throw Error('Revisa el SQL antes de aplicar.');context.plan=null;
+    const original=context.original,target=context.target;
+    return comparisonWorker(target,async worker=>{
+      await comparisonRead(worker,async()=>{
+        await worker.execute('SET SESSION sql_mode = '+literal(original.sqlMode||''));
+        const latest=await inspectComparisonObject(worker,target.engine,target);if(latest.version!==original.version)throw Error('El objeto ha cambiado desde la revisión. No se ha modificado.');
+        if(original.type==='trigger'||plan.drop)await canRestoreDefiner(worker,original);
+        if(plan.drop&&JSON.stringify(await routineGrants(worker,original))!==JSON.stringify(plan.grants))throw Error('Los permisos de la rutina han cambiado. Revisa de nuevo.');
+      });
+      const directory=path.join(app.getPath('userData'),'comparison-backups');await fs.mkdir(directory,{recursive:true});const backupPath=path.join(directory,request.reviewToken+'.json');
+      await fs.writeFile(backupPath,JSON.stringify({original,restoreSQL:original.type==='trigger'?createTriggerSQL(original,original):original.ddl,grants:plan.grants,connection:target.connection,savedAt:new Date().toISOString()},null,2),{mode:0o600});
+      const result=original.type==='trigger'?await replaceTrigger(worker,original,plan.draft):await applyObject(worker,original,plan);
+      let object=null;try{const fresh=await comparisonRead(worker,()=>inspectComparisonObject(worker,target.engine,target));context.original=fresh;object=comparisonSnapshot(fresh);}catch{/* The apply outcome must remain visible if refreshing metadata fails. */}
+      if(result.applied)comparisonEdits.delete(request.token);
+      return {...result,object,backupPath,target:{key:target.key,schema:target.schema,name:target.name,type:target.type},warning:result.warning||(result.applied&&!object?'Cambios aplicados, pero no se pudo verificar la definición. Vuelve a comparar.':undefined)};
+    },{bounded:false,charset:original.collation});
+  }));
+  register('compare:edit-close',token=>comparisonEdits.delete(token));
   let pendingConnectionImport = null;
   let pendingFullImport = null,fullImportReload=false;
   register('backup:reload',()=>{

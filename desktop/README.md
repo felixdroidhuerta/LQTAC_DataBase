@@ -1,5 +1,14 @@
 # LQTAC dbFox · Desktop
 
+## Novedades de 0.2.7
+
+- Comparador MySQL/MariaDB de triggers, vistas, procedimientos y funciones: diferencias por línea y fragmento, filtro por tabla de trigger y exportación JSON.
+- Edición manual desde el comparador o copia del otro lado como borrador, revisión SQL, comprobación de concurrencia y copia original antes de aplicar. Mantiene la identidad del destino y trata la recreación de rutinas/triggers como una operación no atómica.
+- Icono de cilindro para Conexiones; las flechas identifican Comparar bases de datos.
+- Anchos de columna ajustables en los resultados, Ctrl+C/Ctrl+V sobre la celda seleccionada y cambios pendientes hasta confirmación.
+- Avisos persistentes con consulta, respuesta, fila, clave, campo, valores y SQL asociado; navegación a celdas filtradas o en otra página. Corrige el autorrellenado de valores numéricos nativos.
+- Manual 0.2.7 y rutas de ayuda/empaquetado derivadas de la versión de la aplicación.
+
 Primera aplicación Electron independiente dentro del repositorio DBeaver. El código Java original permanece disponible como base de la futura integración JDBC. Los adaptadores nativos de Electron permiten conectar con PostgreSQL (pg), MySQL/MariaDB (mysql2), SQL Server (Tedious), Oracle Thin (node-oracledb), ClickHouse y MongoDB, además de SQLite local mediante sql.js. Todavía no ejecuta el núcleo DBeaver.
 
 ## Versión portable para Windows
@@ -77,7 +86,7 @@ Pruebas del adaptador: `npm test`.
 - Logo dbFox by LQTAC y espacio de trabajo en español.
 - Paneles ajustables mediante separadores: ancho del lateral, altura de navegación frente al explorador y reparto de espacio entre SQL y resultados. Arrastra el divisor o enfócalo con Tab y usa las flechas (Mayús para pasos mayores). Doble clic restablece ese panel; Inicio/Fin llevan a sus límites. Los tamaños se guardan en este equipo y se adaptan al tamaño de la ventana sin ocultar completamente los paneles.
 - Registro de módulos con su disponibilidad real.
-- Conexiones y herramientas en la barra de iconos izquierda. Al pie del explorador, **Acerca de…** muestra la versión y la información de dbFox. El botón **?** abre el manual disponible (edición 0.2.6). El explorador mantiene visibles todos los perfiles guardados: ⏻ verde indica una sesión abierta y ⏻ rojo una conexión cerrada; el botón conecta o desconecta ese perfil. Admite varias sesiones abiertas a la vez.
+- Conexiones y herramientas en la barra de iconos izquierda. Al pie del explorador, **Acerca de…** muestra la versión y la información de dbFox. El botón **?** abre el manual disponible (edición 0.2.7). El explorador mantiene visibles todos los perfiles guardados: ⏻ verde indica una sesión abierta y ⏻ rojo una conexión cerrada; el botón conecta o desconecta ese perfil. Admite varias sesiones abiertas a la vez.
 - Selección múltiple de conexiones con Ctrl/clic o Mayús/clic; botón derecho → Agrupar o Ctrl+Mayús+G. Arrastra las conexiones seleccionadas a un grupo, o a «Sin grupo» para sacarlas. El menú contextual incluye Conectar, Desconectar, Editar conexión, Borrar, Añadir a grupo y Agrupar. Los grupos y sus miembros se guardan localmente en `connection-groups.json`.
 - Borrar elimina el perfil local y cierra solo sus sesiones; no elimina bases de datos. La configuración retirada se copia en `connections-trash.json`, sin contraseñas. Desagrupar conserva los perfiles. Las pestañas SQL quedan vinculadas a la conexión usada al crearlas y activan esa sesión al seleccionarlas; una consulta asociada a una sesión cerrada no se ejecuta contra otra conexión.
 - Conexiones a servidor: todos los motores del selector (PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, ClickHouse y MongoDB) incluyen prueba, conexión, catálogo, consultas y desconexión. Se guardan en `connections.json`, sin contraseñas. Abrir archivos SQLite es una acción independiente.

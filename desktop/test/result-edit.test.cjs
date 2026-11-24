@@ -39,7 +39,7 @@ test('only direct single-table star results are candidates; joins, unions, expre
 });
 test('SQLite changes are bound to original row identities, preserve NULL/text and do not commit an existing transaction',async()=>{
   const {adapter,snapshot,service,info}=await setup();try{
-    assert.equal(info.columns[0].editable,false);assert.equal(info.columns[1].editable,true);
+    assert.equal(info.columns[0].editable,true);assert.equal(info.columns[1].editable,true);
     const text="' ; DROP TABLE records; --\nUnicode á 🐙";
     adapter.database.run('BEGIN');const response=await service.apply({token:info.token,changes:[{row:2,column:1,value:text},{row:0,column:3,value:''},{row:1,column:3,value:null}]},snapshot,adapter,'local',execute);
     assert.equal(response.applied.length,3);assert.equal(adapter.database.exec('SELECT name FROM records WHERE id=3')[0].values[0][0],text);assert.equal(snapshot.results[0].values[2][1],text);
@@ -47,11 +47,10 @@ test('SQLite changes are bound to original row identities, preserve NULL/text an
     adapter.database.run('ROLLBACK');assert.equal(adapter.database.exec('SELECT name FROM records WHERE id=3')[0].values[0][0],'Gamma');
   }finally{adapter.close();}
 });
-test('validate all changes before writing; reject key edits, stale snapshots, different sessions and schema changes',async()=>{
+test('validate all changes before writing; reject stale snapshots, different sessions and schema changes',async()=>{
   const {adapter,snapshot,service,info}=await setup();try{
     await assert.rejects(service.apply({token:info.token,changes:[{row:0,column:1,value:'must not write'},{row:1,column:2,value:'abc'}]},snapshot,adapter,'local',execute),/entero/);
     assert.equal(adapter.database.exec('SELECT name FROM records WHERE id=1')[0].values[0][0],'Alpha');
-    await assert.rejects(service.apply({token:info.token,changes:[{row:0,column:0,value:'10'}]},snapshot,adapter,'local',execute),/editable/);
     await assert.rejects(service.apply({token:info.token,changes:[{row:0,column:1,value:'x'}]},{results:[]},adapter,'local',execute),/caducado/);
     await assert.rejects(service.apply({token:info.token,changes:[{row:0,column:1,value:'x'}]},snapshot,adapter,'another',execute),/conexión/);
     adapter.database.run('ALTER TABLE records ADD COLUMN extra TEXT');await assert.rejects(service.apply({token:info.token,changes:[{row:0,column:1,value:'x'}]},snapshot,adapter,'local',execute),/estructura/);
@@ -90,5 +89,15 @@ test('an unqualified temporary view cannot cause an update of the permanent tabl
   const adapter=await SQLiteAdapter.open();try{adapter.execute("CREATE TABLE hidden(id INTEGER PRIMARY KEY,name TEXT);INSERT INTO main.hidden VALUES(1,'before');CREATE TEMP VIEW hidden AS SELECT 1 AS id,'before' AS name");const sql='SELECT * FROM hidden',result=adapter.execute(sql).results[0];decorateResult(result,{sql,engine:'sqlite',database:'main',adapter});assert.equal(result.editContext.schema,'temp');await assert.rejects(new ResultEdits().open({results:[result]},0,adapter,'sqlite','local'),/vistas/);assert.equal(adapter.database.exec('SELECT name FROM main.hidden')[0].values[0][0],'before');}finally{adapter.close();}
 });
 test('MySQL edit metadata uses the actual protocol and named SHOW fields for keys and column types',async()=>{
-  const {startMySQLFixture}=require('./mysql-fixture.cjs');const {MySQLAdapter}=require('../src/adapters/mysql.cjs');const server=await startMySQLFixture();const adapter=await MySQLAdapter.open(server.profile,'fixture');try{const snapshot={results:[{columns:['id','nombre'],values:[[1,'original']],editContext:{schema:'test',table:'proyectos'}}]};const info=await new ResultEdits().open(snapshot,0,adapter,'mysql','profile');assert.equal(info.columns[0].primary,true);assert.equal(info.columns[0].editable,false);assert.equal(info.columns[1].editable,true);assert.match(info.columns[0].type,/unsigned/);}finally{adapter.close();await server.close();}
+  const {startMySQLFixture}=require('./mysql-fixture.cjs');const {MySQLAdapter}=require('../src/adapters/mysql.cjs');const server=await startMySQLFixture();const adapter=await MySQLAdapter.open(server.profile,'fixture');try{const snapshot={results:[{columns:['id','nombre'],values:[[1,'original']],editContext:{schema:'test',table:'proyectos'}}]};const info=await new ResultEdits().open(snapshot,0,adapter,'mysql','profile');assert.equal(info.columns[0].primary,true);assert.equal(info.columns[0].editable,true);assert.equal(info.columns[1].editable,true);assert.match(info.columns[0].type,/unsigned/);}finally{adapter.close();await server.close();}
+});
+test('primary key edits are guarded by the original key and reload the row by its new key',async()=>{
+  const {adapter,snapshot,service,info}=await setup();try{
+    const response=await service.apply({token:info.token,changes:[{row:0,column:0,value:'10'}]},snapshot,adapter,'local',execute);
+    assert.equal(response.error,undefined);assert.equal(response.requiresReload,false);assert.equal(response.applied.length,1);
+    assert.equal(response.applied[0].values[0],10);assert.equal(snapshot.results[0].values[0][0],10);
+    assert.equal(adapter.database.exec('SELECT COUNT(*) FROM records WHERE id=1')[0].values[0][0],0);
+    assert.equal(adapter.database.exec('SELECT name FROM records WHERE id=10')[0].values[0][0],'Alpha');
+    await assert.rejects(service.apply({token:info.token,changes:[{row:1,column:0,value:'abc'}]},snapshot,adapter,'local',execute),/entero/);
+  }finally{adapter.close();}
 });
