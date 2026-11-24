@@ -13,6 +13,8 @@ test('inspect, edit trigger and restore original definition on a CREATE error', 
     assert.equal(original.table, 'proyectos');
     const draft = { ...original, body: 'SET NEW.nombre = UPPER(NEW.nombre)' };
     assert.equal((await replaceTrigger(adapter, original, draft)).applied, true);
+    assert.ok(fixture.queries.includes('SELECT CURRENT_USER() AS `current_user`'));
+    assert.ok(!fixture.queries.includes('SELECT CURRENT_USER() AS current_user'));
     const edited = await inspectTrigger(adapter, 'test', 'audit_proyectos');
     assert.equal(edited.body, draft.body);
     assert.notEqual(edited.version, original.version);

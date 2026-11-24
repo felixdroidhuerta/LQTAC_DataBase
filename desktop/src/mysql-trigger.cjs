@@ -39,7 +39,7 @@ function createTriggerSQL(draft, original = null) {
 }
 async function canRestoreDefiner(adapter, original) {
   if (!original) return;
-  const [user] = await query(adapter, 'SELECT CURRENT_USER() AS current_user');
+  const [user] = await query(adapter, 'SELECT CURRENT_USER() AS `current_user`');
   if (user.current_user === original.definer) return;
   const grants = await query(adapter, 'SHOW GRANTS FOR CURRENT_USER()');
   const allowed = grants.some(row => /\b(?:SUPER|SET_USER_ID|SET_ANY_DEFINER|ALL PRIVILEGES)\b[\s\S]*\bON\s+\*\.\*/i.test(Object.values(row)[0]));
