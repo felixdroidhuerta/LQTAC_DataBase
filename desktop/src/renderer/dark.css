@@ -15,6 +15,7 @@ html[data-theme=dark] .sql-source-input { background:transparent;color:transpare
 html[data-theme=dark] .sql-composing .sql-source-input { color:#e0f0ff; }
 html[data-theme=dark] :is(.sql-source-surface,.sql-source-surface .sql-highlight-layer) { background:#152232; }
 html[data-theme=dark] .sql-highlight-code { color:#c8d9eb; }
+html[data-theme=dark] .sql-token-punctuation,html[data-theme=dark] .sql-token-operator { color:#e2eaf4; }
 html[data-theme=dark] .sql-source-surface.sql-composing textarea.sql-source-input { color:#e0f0ff!important;-webkit-text-fill-color:#e0f0ff; }
 html[data-theme=dark] :is(.connection-context,.profiles-empty,.query-tab.active) { background:#24394c;color:#dbeafa;border-color:#40556b; }
 html[data-theme=dark] :is(.connection-row.selected,.connection-row.active-connection,.completion-option.selected,.connection-row:hover) { background:#244765;color:#b9deff; }

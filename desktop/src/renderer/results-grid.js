@@ -2,6 +2,7 @@ import {resultRowIndices} from './result-view.js';
 import {attachCellCopy} from './cell-copy.js';
 import {createResultEditor} from './result-editor.js';
 import {attachColumnResize} from './column-resize.js';
+import {attachColumnCopy} from './column-copy.js';
 const $=selector=>document.querySelector(selector);
 const node=(tag,text,className)=>{const item=document.createElement(tag);if(text!==undefined)item.textContent=text;if(className)item.className=className;return item;};
 export function initResultsGrid({api,notify,runTask,onStatus,getQueryContext}){
@@ -35,6 +36,7 @@ export function initResultsGrid({api,notify,runTask,onStatus,getQueryContext}){
   const current=()=>index.value===''?-1:Number(index.value);const state=()=>states[current()];
   const visible=()=>output?output.results.map((_,i)=>i).filter(i=>!closed.has(i)):[];
   const editor=createResultEditor({root,api,notify,runTask,onStatus,getQueryContext,revealCell,getOutput:()=>output,getIndex:current,render:()=>render(),selectCell:(td,focus,event)=>selection.select(td,focus,event||{__dbfoxRows:true}),getVisibleRows:()=>[...root.querySelectorAll('tbody tr')].map(row=>Number(row.dataset.rowIndex)),getSelectedRows:()=>selection.position()?.rows||[],resetSelection:()=>selection.reset()});
+  attachColumnCopy(root,{api,notify,getData:()=>{const result=output?.results[current()];return result?{identity:result,columns:result.columns,values:result.values,indices:resultRowIndices(editor.viewResult(),state()),filtered:!!state()?.search}:null;}});
   function revealCell(row,column){
     const s=state();if(!s)return;let rows=resultRowIndices(editor.viewResult(),s);
     if(!rows.includes(row)){s.search='';s.field=-1;fields();rows=resultRowIndices(editor.viewResult(),s);}
